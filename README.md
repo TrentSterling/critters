@@ -35,7 +35,7 @@ thread, credited gladly).
 - **click or tap the ground**: nearest critter comes to the spot
 - **click or tap a critter**: pet it (happy squash, hearts, chirp)
 - **drag**: orbit camera (wheel or pinch zooms; touch works everywhere)
-- **keys 1–6 or the on-screen buttons**: spawn biped / quadruped / multiped / hopper / flyer / serpent
+- **keys 1–7 or the on-screen buttons**: spawn biped / quadruped / multiped / hopper / flyer / serpent / owl
 - **R or the dice button**: rerolls everyone (new random recipes, same archetypes)
 - **link button**: copies a share link for the nearest critter (full recipe in the URL; the scene seed is always in the URL too)
 - **speaker button**: procedural chirp sounds on/off
@@ -56,7 +56,7 @@ replug and you're back in. Detection uses connect/disconnect events plus per-fra
 
 ### Local co-op
 
-Up to 8 gamepads plus a WASD keyboard seat can play together; Tab switches which critter you control, Esc releases possession.
+Up to 8 gamepads plus a WASD keyboard seat can play together; Tab switches which critter you control, C releases possession (back to spectator).
 
 ## How it works: SDF blend-shell
 

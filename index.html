@@ -2688,7 +2688,7 @@ const hintEl = document.getElementById('hint');
 if (matchMedia('(pointer: coarse)').matches) hintEl.textContent = 'tap the ground to call a critter';
 const HINT_DEFAULT = hintEl.innerHTML;
 const HINT_PAD = '\u{1F3AE} left stick move · A jump/dash · LB/RB switch · right stick camera · triggers zoom';
-const HINT_KEYS = '\u{2328}\u{FE0F} WASD move · Space jump/dash · Tab switch critter · Esc release';
+const HINT_KEYS = '\u{2328}\u{FE0F} WASD move · Space jump/dash · Tab switch critter · C releases';
 const PLAYER_COLORS = ['#fffbe8', '#9ed6ff', '#ffb3cd', '#b5f0b5', '#ffe08a', '#d9b8ff', '#ffc9a3', '#a3fff0'];
 const players = []; // { kind:'pad'|'keys', index, critter, prevButtons, ring, rx, ry, zoom }
 let hintTimer = 0;
@@ -2772,6 +2772,11 @@ addEventListener('keydown', e => {
     e.preventDefault();
     const kp = keyPlayer();
     if (kp) cyclePlayer(kp, e.shiftKey ? -1 : 1);
+    return;
+  }
+  if (k === 'KeyC') { // release to spectator (NOT Esc: the browser owns Esc in fullscreen)
+    const kp = keyPlayer();
+    if (kp) removePlayer(kp);
     return;
   }
   if (!['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(k)) return;
