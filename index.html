@@ -665,6 +665,7 @@ class Critter {
     this.target = null;
     this.lookDir = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
     this.lookTimer = rr(1, 4);
+    this.gazeAt = null; this.gazeT = 0;
     this.wanderTimer = rr(2, 7);
     this.time = rng() * 100;
     this.gaitPhase = rng();
@@ -1009,9 +1010,20 @@ class Critter {
     this.wanderTimer = rr(3, 7);
   }
 
+  nearestBuddy(maxD) {
+    let best = null, bd = maxD * maxD;
+    for (const c of critters) {
+      if (c === this) continue;
+      const d = (c.pos.x - this.pos.x) ** 2 + (c.pos.z - this.pos.z) ** 2;
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+
   pet() {
     this.squashVel -= 2.2; // happy bounce
-    this.lookTimer = 0;
+    this.gazeAt = null;
+    this.lookDir.subVectors(camera.position, this.pos).normalize(); // glance up at you
     const gy = groundY(this.pos.x, this.pos.z);
     spawnHearts(this.pos.x, gy + this.airY + this.bodyY + this.bodyR + 0.25 * this.size, this.pos.z, 4, this.size);
     sfx('pet');
@@ -1081,9 +1093,13 @@ class Critter {
         if (dd > 8) { tx *= 8 / dd; tz *= 8 / dd; }
         this.target = { x: tx, z: tz };
       } else {
-        const a = rng() * TAU;
-        this.lookDir.set(Math.sin(a), rr(-0.1, 0.25), Math.cos(a)).normalize();
-        this.lookTimer = rr(1.5, 3.5);
+        const buddy = rng() < 0.45 ? this.nearestBuddy(4) : null;
+        if (buddy) { this.gazeAt = buddy; this.gazeT = rr(1.5, 3); }
+        else {
+          const a = rng() * TAU;
+          this.lookDir.set(Math.sin(a), rr(-0.1, 0.25), Math.cos(a)).normalize();
+          this.lookTimer = rr(1.5, 3.5);
+        }
       }
     }
   }
@@ -1549,6 +1565,14 @@ class Critter {
     if (this.target) {
       V[0].set(this.target.x - this.pos.x, 0, this.target.z - this.pos.z).normalize();
       this.lookDir.lerp(V[0], Math.min(1, 5 * dt)).normalize();
+    } else if (this.gazeAt) {
+      // social gaze: watch a neighbor for a bit
+      this.gazeT -= dt;
+      if (this.gazeT <= 0 || !critters.includes(this.gazeAt)) this.gazeAt = null;
+      else {
+        V[0].set(this.gazeAt.pos.x - this.pos.x, (this.gazeAt.bodyY - this.bodyY) * 0.4, this.gazeAt.pos.z - this.pos.z).normalize();
+        this.lookDir.lerp(V[0], Math.min(1, 4 * dt)).normalize();
+      }
     }
     // head look springs
     const wantYaw = clamp(angleDiff(Math.atan2(this.lookDir.x, this.lookDir.z), this.heading), -0.55, 0.55);
