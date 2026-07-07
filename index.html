@@ -192,12 +192,14 @@ function alignToGround(mesh, x, z) {
 }
 
 // ---------- shaders ----------
+const MAXP = 40; // shared PRIM_COUNT ceiling; real per-critter count rides the uCount uniform
 const VSH = /* glsl */`
 attribute float aPrim;
 uniform vec4 uPrimA[PRIM_COUNT];   // A.xyz, r1
 uniform vec4 uPrimB[PRIM_COUNT];   // B.xyz, r2
 uniform vec4 uPrimC[PRIM_COUNT];   // color.rgb, blendK
 uniform vec4 uPrimD[PRIM_COUNT];   // gloss, outlineSkip, colorOnly, -
+uniform int uCount;                // real prim count (PRIM_COUNT is a shared max so all critters reuse one compiled program)
 uniform float uIso;
 varying vec3 vNormal;
 varying vec3 vWorldPos;
@@ -226,6 +228,7 @@ float sdRC(vec3 p, vec3 a, vec3 b, float r1, float r2) {
 float fieldDist(vec3 p) {
   float d = 1e9;
   for (int i = 0; i < PRIM_COUNT; i++) {
+    if (i >= uCount) break;
     if (uPrimD[i].z > 0.5) continue; // color-only decal: no geometry
     float di = sdRC(p, uPrimA[i].xyz, uPrimB[i].xyz, uPrimA[i].w, uPrimB[i].w);
     float k = max(uPrimC[i].w, 1e-4);
@@ -239,6 +242,7 @@ void fieldFull(vec3 p, out float dOut, out vec4 cgOut) {
   float d = 1e9;
   vec4 cg = vec4(1.0);
   for (int i = 0; i < PRIM_COUNT; i++) {
+    if (i >= uCount) break;
     float di = sdRC(p, uPrimA[i].xyz, uPrimB[i].xyz, uPrimA[i].w, uPrimB[i].w);
     float k = max(uPrimC[i].w, 1e-4);
     float h = clamp(0.5 + 0.5 * (di - d) / k, 0.0, 1.0);
@@ -927,10 +931,11 @@ class Critter {
 
     // ---------- geometry ----------
     const n = this.prims.length;
-    this.fA = new Float32Array(n * 4);
-    this.fB = new Float32Array(n * 4);
-    this.fC = new Float32Array(n * 4);
-    this.fD = new Float32Array(n * 4);
+    if (n > MAXP) console.warn('critter exceeds MAXP prims:', n);
+    this.fA = new Float32Array(MAXP * 4);
+    this.fB = new Float32Array(MAXP * 4);
+    this.fC = new Float32Array(MAXP * 4);
+    this.fD = new Float32Array(MAXP * 4);
     for (let i = 0; i < n; i++) {
       const pr = this.prims[i];
       this.fC[i * 4] = pr.color[0]; this.fC[i * 4 + 1] = pr.color[1]; this.fC[i * 4 + 2] = pr.color[2];
@@ -969,15 +974,18 @@ class Critter {
     const uniforms = {
       uPrimA: { value: this.fA }, uPrimB: { value: this.fB },
       uPrimC: { value: this.fC }, uPrimD: { value: this.fD },
+      uCount: { value: n },
       uSunDir: sharedUniforms.uSunDir,
     };
+    // PRIM_COUNT is the shared MAXP for every critter, so all bodies (and all
+    // outlines) hit the same cached WebGL program — rebuilds never recompile shaders
     this.matBody = new THREE.ShaderMaterial({
-      defines: { PRIM_COUNT: n },
+      defines: { PRIM_COUNT: MAXP },
       vertexShader: VSH, fragmentShader: FSH_BODY,
       uniforms: { ...uniforms, uIso: { value: 0 } },
     });
     this.matOutline = new THREE.ShaderMaterial({
-      defines: { PRIM_COUNT: n },
+      defines: { PRIM_COUNT: MAXP },
       vertexShader: VSH, fragmentShader: FSH_OUTLINE,
       uniforms: { ...uniforms, uIso: { value: 0.016 * S }, uOutlineTint: { value: new THREE.Color(P.outline) } },
       side: THREE.BackSide,
@@ -2191,6 +2199,7 @@ window.CRITTERS = {
   share: () => shareCritter(),
   _enc: r => encodeRecipe(r),
   _hearts: () => heartPool.filter(s => s.visible).length,
+  _programs: () => renderer.info.programs.length,
   stats: () => ({ critters: critters.length, fps: Math.round(fps), prims: critters.reduce((s, c) => s + c.prims.length, 0), pad: pad.index >= 0, controlling: pad.critter ? pad.critter.arch : null }),
 };
 
