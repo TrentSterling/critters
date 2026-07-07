@@ -7,12 +7,36 @@ every creature is a pile of primitive shapes fused into one seamless toon body b
 
 ![reference](reference/ref_wide.png)
 
+## Play it
+
+**[tront.xyz/critters](https://tront.xyz/critters/)** works on desktop + phone, gamepad optional.
+
+## Credits & provenance
+
+This is a from-scratch replica of **GOOBERS (seamless blend shell critters)** by
+u/AntiqueFeedback7447: [Reddit post](https://redd.it/1umiurs) (r/aigamedev, July 2026),
+[X post](https://x.com/Nevsved/status/2073687955265171924). They published the technique
+writeup ("SDF blend-shell") and the prompt they used, but never released their code;
+everything here was written clean-room against that public description plus screenshots
+of the thread. I disclosed this clone in the original thread (u/MTOMalley).
+
+Their published prompt, for the record: "Build with Three.js and explore a new
+procedurally generated 3D character style: ragdoll-like characters composed of primitive
+shapes that look like one seamless body via a custom, mobile-performant tech-art/shader
+solution, with toon styling, plus a procedural animation system that works for 2-legged,
+any-legged, no-legged (hopping) and flying characters with arms."
+
+Visual prior art: [RujiK the Comatose](https://www.youtube.com/@RujiKtheComatose),
+whose pre-AI procedural creature work this style strongly resembles (spotted by the
+thread, credited gladly).
+
 ## Controls
 
-- **click the ground** — nearest critter comes to the spot
-- **drag** — orbit camera (wheel zooms)
-- **keys 1–5** — spawn biped / quadruped / multiped / hopper / flyer
-- **R** — rerolls everyone (new random recipes, same archetypes)
+- **click or tap the ground**: nearest critter comes to the spot
+- **drag**: orbit camera (wheel or pinch zooms; touch works everywhere)
+- **keys 1–5 or the on-screen buttons**: spawn biped / quadruped / multiped / hopper / flyer
+- **R or the dice button**: rerolls everyone (new random recipes, same archetypes)
+- **? button**: about + credits
 
 ### Xbox controller
 
@@ -97,8 +121,7 @@ rolls endless random ones within archetype constraints.
 
 - `index.html` — everything (CSS + JS + GLSL inline)
 - `DESIGN.md` — design/spec notes
+- `docs/` — design specs and implementation plans
+- `tools/verify.mjs` — headless-Chrome CDP verification harness
 - `reference/` — target screenshots the look was matched against
 - `verify/` — headless-Chrome verification captures
-
-Technique reimplemented from a public description of the "SDF blend-shell" approach
-(see `DESIGN.md`); all code here written from scratch.
