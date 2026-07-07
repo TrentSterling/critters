@@ -143,7 +143,18 @@ function mulberry32(seed) {
   };
 }
 const urlSeed = parseInt(new URLSearchParams(location.search).get('seed') || '', 10);
-let rng = mulberry32(Number.isFinite(urlSeed) ? urlSeed : (Math.random() * 1e9) | 0);
+let curSeed = Number.isFinite(urlSeed) ? urlSeed : (Math.random() * 1e9) | 0;
+let rng = mulberry32(curSeed);
+function reseed(n) {
+  curSeed = n >>> 0;
+  rng = mulberry32(curSeed);
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('seed', curSeed);
+    history.replaceState(null, '', u);
+  } catch { /* file:// or odd contexts: URL just doesn't update */ }
+}
+if (!Number.isFinite(urlSeed)) reseed(curSeed);
 const rr = (a, b) => lerp(a, b, rng());
 const pick = arr => arr[(rng() * arr.length) | 0];
 
@@ -1602,7 +1613,8 @@ function spawnArch(arch) {
   return spawnCritter(genRecipe(arch), clamp(x, -8, 8), clamp(z, -8, 8), rng() * TAU);
 }
 
-function rerollAll() {
+function rerollAll(seed) {
+  reseed(seed !== undefined ? seed : (Math.random() * 1e9) | 0);
   const old = critters.slice();
   critters.length = 0;
   for (const c of old) {
@@ -1820,7 +1832,7 @@ window.CRITTERS = {
   list: critters,
   spawn: arch => spawnArch(arch),
   spawnRecipe: (r, x = 0, z = 0) => spawnCritter(r, x, z, rng() * TAU),
-  reroll: rerollAll,
+  reroll: seed => rerollAll(seed),
   frame: (i, dist = 3.4) => {
     const c = critters[i]; if (!c) return;
     controls.target.set(c.pos.x, groundY(c.pos.x, c.pos.z) + c.airY + c.bodyY, c.pos.z);
