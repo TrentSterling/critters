@@ -92,6 +92,7 @@
   <button data-act="f" title="spawn flyer (5)">&#128029;</button>
   <span class="ui-sep"></span>
   <button data-act="reroll" title="reroll everyone (R)">&#127922;</button>
+  <button data-act="share" title="copy a link to the nearest critter">&#128279;</button>
   <button data-act="credits" title="about and credits">?</button>
 </div>
 <div id="credits" hidden>
@@ -1634,6 +1635,13 @@ FEATURED.forEach((r, i) => {
   c.spawnT = 1; c.squash = 1; c.squashVel = 0;
 });
 
+// a shared critter link (#r=...) spawns that critter front and center
+const sharedRecipe = location.hash.startsWith('#r=') ? decodeRecipe(location.hash.slice(3)) : null;
+if (sharedRecipe && sharedRecipe.archetype) {
+  spawnCritter(sharedRecipe, 0, 1.5, Math.PI);
+  controls.target.set(0, 0.7, 1.5);
+}
+
 // ---------- input ----------
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -1675,8 +1683,36 @@ document.getElementById('ui').addEventListener('click', e => {
   if (!act) return;
   if (UI_ACTS[act]) spawnArch(UI_ACTS[act]);
   else if (act === 'reroll') rerollAll();
+  else if (act === 'share') shareCritter();
   else if (act === 'credits') toggleCredits();
 });
+
+// ---------- share links (recipe in the URL hash) ----------
+function encodeRecipe(r) {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(r))))
+    .replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+function decodeRecipe(s) {
+  try {
+    const b = s.replaceAll('-', '+').replaceAll('_', '/');
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b), c => c.charCodeAt(0))));
+  } catch { return null; }
+}
+let toastTimer = 0;
+function toast(msg) {
+  hintEl.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { hintEl.innerHTML = HINT_DEFAULT; }, 2200);
+}
+async function shareCritter() {
+  const c = pad.critter || nearestCritterTo(controls.target.x, controls.target.z);
+  if (!c) return;
+  const u = new URL(location.href);
+  u.hash = 'r=' + encodeRecipe(c.recipe);
+  try { history.replaceState(null, '', u); } catch {}
+  try { await navigator.clipboard.writeText(u.href); toast('critter link copied!'); }
+  catch { toast('link is in the address bar'); }
+}
 
 // ---------- gamepad (xbox) ----------
 const hintEl = document.getElementById('hint');
@@ -1846,6 +1882,8 @@ window.CRITTERS = {
   step: (ms = 16) => { stepQueue = ms / 1000; },
   possess: i => padPossess(critters[i] || null),
   release: () => padPossess(null),
+  share: () => shareCritter(),
+  _enc: r => encodeRecipe(r),
   stats: () => ({ critters: critters.length, fps: Math.round(fps), prims: critters.reduce((s, c) => s + c.prims.length, 0), pad: pad.index >= 0, controlling: pad.critter ? pad.critter.arch : null }),
 };
 
