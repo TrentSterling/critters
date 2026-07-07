@@ -282,29 +282,46 @@ void main() {
   // outline width: constant-ish in screen space, capped so thin parts get thin lines
   float distScale = clamp(length(cameraPosition - c) / 9.0, 0.35, 2.5);
   float isoW = min(uIso * distScale, rT * 0.55);
+  float slideW = isoW;
 
   float d0 = fieldDist(p);
-  float bury = smoothstep(0.55, 1.15, (-d0) / max(rT, 0.02));
-  if (uIso > 0.0001 && uPrimD[pi].y > 0.5) bury = 1.0; // embedded decor: no outline
-  if (uPrimD[pi].z > 0.5) bury = 1.0;                  // color-only decal: hide its mesh
-  float iso = mix(isoW, -rT * 0.4 - isoW * 2.0, bury);
+  // concave blend valley detector: the smin union dips below the vert's own-prim
+  // distance exactly where shapes blend. The offset shell self-folds there (dark
+  // slivers on the seam), so the outline collapses to a hairline in valleys
+  float dOwn = sdRC(p, A.xyz, B.xyz, A.w, B.w);
+  float kOwn = max(uPrimC[pi].w, 1e-4);
+  float conc = smoothstep(0.55, 1.15, (dOwn - d0) / (kOwn * 0.25));
+  if (uIso > 0.0001) isoW *= (1.0 - 0.85 * conc);
+  // buried verts tuck JUST under the skin: deep negative isos cut visible creases
+  // into overlap zones (neck/shoulder), a hair below kills z-fighting without cutting
+  float bury = smoothstep(0.70, 1.25, (-d0) / max(rT, 0.02));
+  // tuck buried verts a hair under the skin on BOTH passes: deep tucks make the
+  // shell cross the surface inside the bury transition band and cut visible creases.
+  // Buried OUTLINE verts get hidden by an amplified view-ray slide below instead.
+  float buriedIso = (uIso > 0.0001) ? (-isoW * 1.2) : (-isoW * 1.2 - rT * 0.06);
+  if (uIso > 0.0001 && uPrimD[pi].y > 0.5) { bury = 1.0; buriedIso = -rT * 0.4 - isoW * 2.0; } // no-outline decor hides fully
+  if (uPrimD[pi].z > 0.5) { bury = 1.0; buriedIso = -rT * 0.4 - isoW * 2.0; }                  // color-only decal: hide its mesh
+  float iso = mix(isoW, buriedIso, bury);
 
   // Newton projection with a fresh gradient each step (stale gradients fold the hull
-  // around thin prims and concave blends)
+  // around thin prims and concave blends); steps are CLAMPED so unreliable gradients
+  // in smin valleys can never launch a vertex off the body (shrapnel spikes)
+  float maxStep = max(rT * 1.5, 0.12);
   vec3 g = fieldGrad(p);
-  p -= g * (d0 - iso);
+  p -= g * clamp(d0 - iso, -maxStep, maxStep);
   g = fieldGrad(p);
   float d1 = fieldDist(p);
-  p -= g * (d1 - iso);
+  p -= g * clamp(d1 - iso, -maxStep, maxStep);
   float dF; vec4 cg;
   fieldFull(p, dF, cg);
-  p -= g * (dF - iso);
+  p -= g * clamp(dF - iso, -maxStep, maxStep);
   vec3 nF = fieldGrad(p);
 
   if (uIso > 0.0001) {
     // slide the outline shell away from the camera along the view ray: screen position
-    // is unchanged, but interior folds hide behind the body instead of covering it
-    p += normalize(p - cameraPosition) * isoW * 1.4;
+    // is unchanged, but interior folds hide behind the body instead of covering it.
+    // Buried and valley verts slide MUCH further so the z-buffer swallows them
+    p += normalize(p - cameraPosition) * slideW * (1.4 + bury * 60.0 + conc * 24.0);
   }
 
   vNormal = nF;
@@ -968,7 +985,9 @@ class Critter {
     }
     const merged = mergeGeometries(geos, false);
     for (const g of geos) g.dispose();
-    merged.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 4 * S);
+    // serpent chains trail well behind the root; keep frustum culling honest
+    const boundR = this.chain ? Math.max(4 * S, R.body.len * S + 2) : 4 * S;
+    merged.boundingSphere = new THREE.Sphere(new THREE.Vector3(), boundR);
     this.geo = merged;
 
     const uniforms = {
@@ -2200,6 +2219,15 @@ window.CRITTERS = {
   _enc: r => encodeRecipe(r),
   _hearts: () => heartPool.filter(s => s.visible).length,
   _programs: () => renderer.info.programs.length,
+  view: (i, theta = 0, dist = 3.2, h = 0.35) => {
+    const c = critters[i]; if (!c) return;
+    const cy = groundY(c.pos.x, c.pos.z) + c.airY + c.bodyY;
+    controls.target.set(c.pos.x, cy, c.pos.z);
+    camera.position.set(
+      c.pos.x + Math.sin(theta) * dist,
+      cy + dist * h,
+      c.pos.z + Math.cos(theta) * dist);
+  },
   stats: () => ({ critters: critters.length, fps: Math.round(fps), prims: critters.reduce((s, c) => s + c.prims.length, 0), pad: pad.index >= 0, controlling: pad.critter ? pad.critter.arch : null }),
 };
 
