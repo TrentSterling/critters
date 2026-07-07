@@ -790,6 +790,7 @@ class Critter {
     this.gaitPhase = rng();
     this.squash = 1; this.squashVel = 0;
     this.dip = 0; this.dipVel = 0;
+    this.idleBumpTimer = rr(4, 9); // F4: rare idle settle/bounce blip
     this.airY = 0;
     this.speedN = 0;
     this.pitch = 0; this.roll = 0;
@@ -968,7 +969,10 @@ class Critter {
       for (let i = 0; i < dirs.length; i++) idx.push(addPrim(colors[i], ks[i] * S, glosses[i] || 0.15));
       let iTip = -1, tipR = 0;
       if (tipBall) { iTip = addPrim(tipBall.color, tipBall.k * S, 0.3); tipR = tipBall.r * S; }
-      this.ropes.push({ rope, attachLocal, idx, radii: radii.map(r => r * S), iTip, tipR });
+      // F4: per-rope idle excitation — a timer nudges a mid-segment point so tails
+      // flop and antennae boing even when the body itself isn't moving
+      const idleMid = Math.max(1, (dirs.length / 2) | 0);
+      this.ropes.push({ rope, attachLocal, idx, radii: radii.map(r => r * S), iTip, tipR, idleTimer: rr(1.5, 4), idleMid });
     };
 
     if (R.tail) {
@@ -1180,6 +1184,12 @@ class Critter {
   update(dt) {
     this.time += dt;
     if (this.spawnT < 1) this.spawnT = Math.min(1, this.spawnT + dt * 2.2);
+    // F4: rare idle settle/bounce blip so idle critters visibly breathe + bounce
+    this.idleBumpTimer -= dt;
+    if (this.idleBumpTimer <= 0) {
+      this.idleBumpTimer = rr(4, 9);
+      if (this.speedN < 0.15) this.squashVel -= 0.4;
+    }
     if (this.arch === 'hopper') this.updateHopper(dt);
     else if (this.arch === 'flyer') this.updateFlyer(dt);
     else if (this.arch === 'serpent') this.updateSerpent(dt);
@@ -1816,6 +1826,18 @@ class Critter {
         updateRope(rp.rope, 0.016, V[4].x, V[4].y, V[4].z, this.quat);
       } else {
         updateRope(rp.rope, Math.min(dt, 0.033), V[4].x, V[4].y, V[4].z, this.quat);
+        // F4: tiny idle excitation — nudge a mid-segment point so tails flop and
+        // antennae boing at rest; the verlet damping + shape-memory settle it back
+        rp.idleTimer -= dt;
+        if (rp.idleTimer <= 0) {
+          rp.idleTimer = rr(1.5, 4);
+          const kick = rp.rope.segLen * rr(0.4, 0.8);
+          const ang = rng() * TAU;
+          const pt = rp.rope.pts[rp.idleMid];
+          pt.x += Math.sin(ang) * kick;
+          pt.z += Math.cos(ang) * kick;
+          pt.y += rr(-0.3, 0.6) * kick;
+        }
       }
       const pts = rp.rope.pts;
       for (let i = 0; i < rp.idx.length; i++) {
@@ -1968,7 +1990,8 @@ class Prop {
     this.id = propSerial++;
     this.kind = kind;
     this.pos = new THREE.Vector3(x, 0, z);
-    this.sway = null; // trees only: { list: [{i, bx, bz, phase}] }
+    this.sway = null; // trees only: { phase, trunk:{i,tx,tz}, list: [{i, bx, bz, phase}] }
+    this.wiggle = null; // mushrooms/flowers only: { list: [{i, bx, bz, phase}] }
     this.perches = []; // trees only: world-space owl perch points on canopy tops
     this.outlineTint = '#2c332a';
     this.build();
@@ -2065,11 +2088,12 @@ class Prop {
   buildTree(x, z, gy, addPrim) {
     const trunkH = rr(0.9, 1.4);
     const bark = hsl(rr(30, 55), 0.28, rr(0.24, 0.32));
-    addPrim(bark, 0.07, 0.08, x, gy, z, x, gy + trunkH, z, 0.14, 0.10);
+    const trunkI = addPrim(bark, 0.07, 0.08, x, gy, z, x, gy + trunkH, z, 0.14, 0.10);
     const topY = gy + trunkH;
     const leafHue = rr(96, 132);
     const nCanopy = 2 + (rng() * 3 | 0);
-    this.sway = { list: [] };
+    // F4: whole-tree wind phase (trunk lean) + per-blob phase (own ripple)
+    this.sway = { phase: rng() * TAU, trunk: { i: trunkI, tx: x, tz: z }, list: [] };
     for (let i = 0; i < nCanopy; i++) {
       const a = rng() * TAU, rad = rr(0.1, 0.34);
       const cx = x + Math.sin(a) * rad, cz = z + Math.cos(a) * rad;
@@ -2111,7 +2135,9 @@ class Prop {
     // its own bulk swallows the whole stem instead of just kissing the tip
     const capBaseY = gy + stemH + capR * 0.8;
     const capTopY = capBaseY + capR * 0.7;
-    addPrim(cap, 0.05, 0.15, x, capBaseY, z, x, capTopY, z, capR, capR * 0.45);
+    const capI = addPrim(cap, 0.05, 0.15, x, capBaseY, z, x, capTopY, z, capR, capR * 0.45);
+    // F4: tiny idle wiggle so the cap nods on its stem at rest
+    this.wiggle = { list: [{ i: capI, bx: x, bz: z, phase: rng() * TAU }] };
     const nSpots = 1 + (rng() < 0.5 ? 1 : 0);
     for (let i = 0; i < nSpots; i++) {
       // right at the cap's wide base ring, offset ~85% of capR out from the axis: a
@@ -2129,6 +2155,7 @@ class Prop {
   buildFlower(x, z, gy, addPrim) {
     const nStems = 2 + (rng() * 2 | 0);
     const stemColor = hsl(110, 0.35, 0.34);
+    this.wiggle = { list: [] }; // F4: idle wiggle, especially the flower heads
     for (let i = 0; i < nStems; i++) {
       const a = rng() * TAU, rad = rr(0, 0.08);
       const sx = x + Math.sin(a) * rad, sz = z + Math.cos(a) * rad;
@@ -2140,7 +2167,8 @@ class Prop {
       // by ~its own radius, or its bulk swallows the whole thin stem
       const headBaseY = gy + h + hr * 0.75;
       const headTopY = headBaseY + hr * 0.6;
-      addPrim(headCol, 0.045, 0.2, sx, headBaseY, sz, sx, headTopY, sz, hr, hr * 0.55);
+      const headI = addPrim(headCol, 0.045, 0.2, sx, headBaseY, sz, sx, headTopY, sz, hr, hr * 0.55);
+      this.wiggle.list.push({ i: headI, bx: sx, bz: sz, phase: rng() * TAU });
     }
     this.outlineTint = '#243a1c';
   }
@@ -2153,19 +2181,39 @@ class Prop {
   }
 }
 
-// canopy sway: gentle sine offset on tree canopy blobs only, everything else in the
-// meadow is fully static (zero per-frame CPU cost beyond this one loop)
+// canopy sway: layered wind sine (slow big + faster small ripple) on tree canopy blobs
+// + a matching trunk-top lean so the whole tree waves, not just the blobs; mushrooms
+// and flowers get a much tinier idle wiggle. Everything else in the meadow (rocks) is
+// fully static — zero per-frame CPU cost beyond this one loop.
 let propTime = 0;
 function updateTrees(dt) {
   propTime += dt;
   for (const p of props) {
-    if (!p.sway) continue;
-    for (const s of p.sway.list) {
-      const off = Math.sin(propTime * 0.5 + s.phase) * 0.04;
-      const nx = s.bx + off, nz = s.bz + off * 0.7;
-      const o = s.i * 4;
-      p.fA[o] = nx; p.fA[o + 2] = nz;
-      p.fB[o] = nx; p.fB[o + 2] = nz;
+    if (p.sway) {
+      const ph = p.sway.phase;
+      const windX = Math.sin(propTime * 0.5 + ph) * 0.10 + Math.sin(propTime * 0.32 + ph * 1.7) * 0.045;
+      const windZ = Math.sin(propTime * 0.42 + ph + 1.3) * 0.08 + Math.sin(propTime * 0.27 + ph * 1.4) * 0.03;
+      // trunk-top lean: shift just the trunk prim's top endpoint so the trunk itself
+      // tips with the wind, not only the canopy blobs sitting on top of it
+      const t = p.sway.trunk, to = t.i * 4;
+      p.fB[to] = t.tx + windX * 0.4; p.fB[to + 2] = t.tz + windZ * 0.4;
+      for (const s of p.sway.list) {
+        const ripple = Math.sin(propTime * 1.8 + s.phase) * 0.03;
+        const rippleZ = Math.sin(propTime * 1.3 + s.phase * 1.4) * 0.02;
+        const nx = s.bx + windX + ripple, nz = s.bz + windZ * 0.7 + rippleZ;
+        const o = s.i * 4;
+        p.fA[o] = nx; p.fA[o + 2] = nz;
+        p.fB[o] = nx; p.fB[o + 2] = nz;
+      }
+    } else if (p.wiggle) {
+      for (const s of p.wiggle.list) {
+        const off = Math.sin(propTime * 1.1 + s.phase) * 0.018;
+        const offZ = Math.sin(propTime * 0.8 + s.phase * 1.6) * 0.013;
+        const nx = s.bx + off, nz = s.bz + offZ;
+        const o = s.i * 4;
+        p.fA[o] = nx; p.fA[o + 2] = nz;
+        p.fB[o] = nx; p.fB[o + 2] = nz;
+      }
     }
   }
 }
@@ -2837,7 +2885,14 @@ function airborne(c) {
   if (c.arch === 'owl') return c.oState === 'glide' || !!c.oPerch;
   return false;
 }
+// F5: soft collision reactions — squash pulse + velocity nudge + a small dust puff when
+// a pair's overlap is closing fast, kid-safe (forces only, no damage). Rate-limited per
+// pair so a crowd doesn't constantly smoke; a possessed critter plowing through barely
+// flinches itself but gives its victim a bigger jolt.
+const bumpCooldown = new Map();
+let bumpClock = 0;
 function separate(dt) {
+  bumpClock += dt;
   for (let i = 0; i < critters.length; i++) {
     for (let j = i + 1; j < critters.length; j++) {
       const a = critters[i], b = critters[j];
@@ -2850,6 +2905,27 @@ function separate(dt) {
         const nx = dx / d, nz = dz / d;
         a.pos.x -= nx * push; a.pos.z -= nz * push;
         b.pos.x += nx * push; b.pos.z += nz * push;
+
+        const approach = -((b.vel.x - a.vel.x) * nx + (b.vel.z - a.vel.z) * nz);
+        if (approach > 0.8) {
+          const key = a.id < b.id ? a.id + '_' + b.id : b.id + '_' + a.id;
+          if (bumpClock >= (bumpCooldown.get(key) || 0)) {
+            bumpCooldown.set(key, bumpClock + 0.6);
+            const amt = clamp(approach, 0.8, 3.5);
+            // the possessed/plowing critter barely slows; its victim takes the bigger hit
+            const aMul = a.controlled ? 0.3 : (b.controlled ? 1.4 : 1);
+            const bMul = b.controlled ? 0.3 : (a.controlled ? 1.4 : 1);
+            a.squashVel -= amt * 0.5 * aMul;
+            b.squashVel -= amt * 0.5 * bMul;
+            const kick = amt * 0.12;
+            a.vel.x -= nx * kick * aMul; a.vel.z -= nz * kick * aMul;
+            b.vel.x += nx * kick * bMul; b.vel.z += nz * kick * bMul;
+            const mx = (a.pos.x + b.pos.x) * 0.5, mz = (a.pos.z + b.pos.z) * 0.5;
+            const my = groundY(mx, mz) + Math.max(a.bodyY, b.bodyY) * 0.3;
+            spawnDust(mx, my, mz, 3, 0.14 * Math.max(a.size, b.size), 0.13 * Math.max(a.size, b.size), 0.35);
+            if (amt > 2.4) sfx('land');
+          }
+        }
       }
     }
   }
