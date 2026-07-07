@@ -924,7 +924,7 @@ class Critter {
           phase,
           planted: new THREE.Vector3(), pos: new THREE.Vector3(),
           swingFrom: new THREE.Vector3(), swingT: -1, swingDur: 0.2,
-          knee: new THREE.Vector3(), cooldown: 0, initd: false,
+          knee: new THREE.Vector3(), cooldown: 0, initd: false, wasAirborne: false,
           poleUp: L.poleUp || 0,
         });
       }
@@ -1329,6 +1329,30 @@ class Critter {
         leg.pos.copy(leg.planted);
       }
       leg.cooldown -= dt;
+
+      if (this.airY > 0) {
+        // airborne: tuck the foot toward the hip instead of IK-planting a stale ground target
+        leg.wasAirborne = true;
+        const reach = leg.l1 + leg.l2;
+        this.toWorld(V[3], leg.hipLocal, this.lift); // hip world
+        const dangle = Math.sin(this.time * 7 + leg.phase * TAU) * reach * 0.08;
+        V[2].set(dangle, -reach * 0.55, -reach * 0.22).applyQuaternion(this.quat);
+        const tk = Math.min(1, 14 * dt);
+        leg.pos.x = lerp(leg.pos.x, V[3].x + V[2].x, tk);
+        leg.pos.y = lerp(leg.pos.y, V[3].y + V[2].y, tk);
+        leg.pos.z = lerp(leg.pos.z, V[3].z + V[2].z, tk);
+        continue;
+      }
+      if (leg.wasAirborne) {
+        // landing: re-plant with juice — snap to a fresh rest position, then a quick staggered restep pop
+        leg.wasAirborne = false;
+        leg.planted.set(rx, ry, rz);
+        leg.pos.copy(leg.planted);
+        leg.swingFrom.copy(leg.planted);
+        leg.swingDur = 0.12 + leg.phase * 0.06;
+        leg.swingT = 0;
+        leg.cooldown = 0;
+      }
 
       const dxp = rx - leg.planted.x, dzp = rz - leg.planted.z;
       const drift = Math.sqrt(dxp * dxp + dzp * dzp);
@@ -1796,7 +1820,7 @@ class Critter {
       this.toWorld(V[4], arm.shoulder, this.lift);
       const swing = Math.sin(this.gaitPhase * TAU + (arm.side < 0 ? Math.PI : 0)) * 0.6 * this.speedN
         + Math.sin(this.time * 1.3 + arm.side) * 0.06;
-      V[6].set(arm.side * 0.35, -0.88, swing).normalize().applyQuaternion(this.yawQuat);
+      V[6].set(arm.side * 0.35, -0.88 + (this.airY > 0 ? 0.2 : 0), swing).normalize().applyQuaternion(this.yawQuat);
       V[5].copy(V[4]).addScaledVector(V[6], arm.len);
       this.setPrim(arm.iArm, V[4], V[5], arm.r1, arm.r2);
       V[7].copy(V[5]); V[7].y -= 0.005;
