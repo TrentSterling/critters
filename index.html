@@ -497,6 +497,58 @@ function updateDust(dt) {
   }
 }
 
+// ---------- heart particles (petting) ----------
+function sfx() {} // replaced by the procedural audio section below at load; kept callable everywhere
+const heartTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ff8fae';
+  g.beginPath();
+  g.moveTo(32, 56);
+  g.bezierCurveTo(6, 36, 8, 12, 24, 12);
+  g.bezierCurveTo(30, 12, 32, 18, 32, 20);
+  g.bezierCurveTo(32, 18, 34, 12, 40, 12);
+  g.bezierCurveTo(56, 12, 58, 36, 32, 56);
+  g.fill();
+  return new THREE.CanvasTexture(c);
+})();
+const heartPool = [];
+for (let i = 0; i < 18; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: heartTex, transparent: true, opacity: 0, depthWrite: false }));
+  s.visible = false;
+  s.userData = { life: 0, dur: 1, vel: new THREE.Vector3(), size: 1, wob: 0 };
+  dustGroup.add(s);
+  heartPool.push(s);
+}
+let heartIdx = 0;
+function spawnHearts(x, y, z, n = 4, scale = 1) {
+  for (let i = 0; i < n; i++) {
+    const s = heartPool[heartIdx++ % heartPool.length];
+    s.position.set(x + (Math.random() - 0.5) * 0.3 * scale, y + Math.random() * 0.1, z + (Math.random() - 0.5) * 0.3 * scale);
+    s.userData.vel.set((Math.random() - 0.5) * 0.25, 0.75 + Math.random() * 0.5, (Math.random() - 0.5) * 0.25);
+    s.userData.life = 0;
+    s.userData.dur = 0.8 + Math.random() * 0.35;
+    s.userData.size = (0.12 + Math.random() * 0.08) * scale;
+    s.userData.wob = Math.random() * TAU;
+    s.visible = true;
+  }
+}
+function updateHearts(dt) {
+  for (const s of heartPool) {
+    if (!s.visible) continue;
+    const u = s.userData;
+    u.life += dt;
+    if (u.life >= u.dur) { s.visible = false; continue; }
+    const t = u.life / u.dur;
+    u.wob += dt * 7;
+    s.position.addScaledVector(u.vel, dt);
+    s.position.x += Math.sin(u.wob) * 0.09 * dt;
+    const sc = u.size * (0.7 + t * 0.7);
+    s.scale.set(sc, sc, 1);
+    s.material.opacity = 0.95 * (1 - t * t);
+  }
+}
+
 // ---------- click rings ----------
 const ringPool = [];
 for (let i = 0; i < 6; i++) {
@@ -955,6 +1007,14 @@ class Critter {
     this.target = { x, z };
     this.squashVel -= 1.8; // excited blip
     this.wanderTimer = rr(3, 7);
+  }
+
+  pet() {
+    this.squashVel -= 2.2; // happy bounce
+    this.lookTimer = 0;
+    const gy = groundY(this.pos.x, this.pos.z);
+    spawnHearts(this.pos.x, gy + this.airY + this.bodyY + this.bodyR + 0.25 * this.size, this.pos.z, 4, this.size);
+    sfx('pet');
   }
 
   // ============ per-frame ============
@@ -1821,6 +1881,16 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (dx * dx + dy * dy > 49 || performance.now() - downT > 450) return;
   ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(ndc, camera);
+  // petting: does the tap ray pass close to a critter's body center?
+  let petted = null, petDepth = 1e9;
+  for (const c of critters) {
+    V[5].set(c.pos.x, groundY(c.pos.x, c.pos.z) + c.airY + c.bodyY, c.pos.z);
+    if (ray.ray.distanceToPoint(V[5]) < c.bodyR * 1.6) {
+      const depth = V[5].distanceToSquared(camera.position);
+      if (depth < petDepth) { petDepth = depth; petted = c; }
+    }
+  }
+  if (petted) { petted.pet(); return; }
   const hit = ray.intersectObject(ground, false);
   if (!hit.length) return;
   const p = hit[0].point;
@@ -2053,6 +2123,7 @@ window.CRITTERS = {
   release: () => padPossess(null),
   share: () => shareCritter(),
   _enc: r => encodeRecipe(r),
+  _hearts: () => heartPool.filter(s => s.visible).length,
   stats: () => ({ critters: critters.length, fps: Math.round(fps), prims: critters.reduce((s, c) => s + c.prims.length, 0), pad: pad.index >= 0, controlling: pad.critter ? pad.critter.arch : null }),
 };
 
@@ -2068,6 +2139,7 @@ function tick() {
     separate(dt);
     for (const c of critters) c.update(dt);
     updateDust(dt);
+    updateHearts(dt);
     updateRings(dt);
     updatePadCamera(dt);
   }
