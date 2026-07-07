@@ -1679,6 +1679,239 @@ function angleDiff(a, b) {
   return d;
 }
 
+// ---------- static props: SDF blend-shell flora (trees, rocks, mushrooms, flowers) ----------
+// same prim/shader pipeline as Critter, built ONCE — no per-frame CPU cost except the tiny
+// tree canopy sway. World-space endpoints are baked directly into the prim arrays at build
+// time (no toWorld() needed: props never move, so there is no local->world frame to track).
+const props = [];
+let propSerial = 0;
+
+class Prop {
+  constructor(kind, x, z) {
+    this.id = propSerial++;
+    this.kind = kind;
+    this.pos = new THREE.Vector3(x, 0, z);
+    this.sway = null; // trees only: { list: [{i, bx, bz, phase}] }
+    this.outlineTint = '#2c332a';
+    this.build();
+  }
+
+  build() {
+    const x = this.pos.x, z = this.pos.z;
+    const gy = groundY(x, z);
+    const meta = [];  // {color,k,gloss,noOutline,colorOnly}
+    const ends = [];  // {ax,ay,az,bx,by,bz,r1,r2} parallel to meta
+    const addPrim = (color, k, gloss, ax, ay, az, bx, by, bz, r1, r2, noOutline = 0, colorOnly = 0) => {
+      meta.push({ color, k, gloss, noOutline, colorOnly });
+      ends.push({ ax, ay, az, bx, by, bz, r1, r2 });
+      return meta.length - 1;
+    };
+
+    if (this.kind === 'tree') this.buildTree(x, z, gy, addPrim);
+    else if (this.kind === 'rock') this.buildRock(x, z, gy, addPrim);
+    else if (this.kind === 'mushroom') this.buildMushroom(x, z, gy, addPrim);
+    else this.buildFlower(x, z, gy, addPrim);
+
+    const n = meta.length;
+    if (n > MAXP) console.warn('prop exceeds MAXP prims:', n);
+    this.fA = new Float32Array(MAXP * 4);
+    this.fB = new Float32Array(MAXP * 4);
+    this.fC = new Float32Array(MAXP * 4);
+    this.fD = new Float32Array(MAXP * 4);
+    let top = -Infinity, bottom = Infinity, horiz = 0.3;
+    for (let i = 0; i < n; i++) {
+      const m = meta[i], e = ends[i];
+      const o = i * 4;
+      this.fA[o] = e.ax; this.fA[o + 1] = e.ay; this.fA[o + 2] = e.az; this.fA[o + 3] = e.r1;
+      this.fB[o] = e.bx; this.fB[o + 1] = e.by; this.fB[o + 2] = e.bz; this.fB[o + 3] = e.r2;
+      this.fC[o] = m.color[0]; this.fC[o + 1] = m.color[1]; this.fC[o + 2] = m.color[2]; this.fC[o + 3] = m.k;
+      this.fD[o] = m.gloss; this.fD[o + 1] = m.noOutline; this.fD[o + 2] = m.colorOnly;
+      top = Math.max(top, e.ay + e.r1, e.by + e.r2);
+      bottom = Math.min(bottom, e.ay - e.r1, e.by - e.r2);
+      horiz = Math.max(horiz, Math.hypot(e.ax - x, e.az - z) + e.r1, Math.hypot(e.bx - x, e.bz - z) + e.r2);
+    }
+    this.bodyY = (top + bottom) / 2 - gy; // center height above ground, for camera targeting
+    this.bodyR = Math.max(0.3, Math.hypot(horiz, (top - bottom) / 2));
+
+    const geos = [];
+    for (let i = 0; i < n; i++) {
+      const e = ends[i];
+      const r = Math.max(e.r1, e.r2);
+      const len = Math.hypot(e.bx - e.ax, e.by - e.ay, e.bz - e.az);
+      let w, h;
+      if (r >= 0.26) { w = 36; h = 28; }
+      else if (r >= 0.13) { w = 22; h = 17; }
+      else if (r >= 0.055) { w = 14; h = 11; }
+      else { w = 10, h = 9; }
+      if (len > r * 2.5) h += 8;
+      const g = new THREE.SphereGeometry(1, w, h);
+      g.deleteAttribute('normal'); g.deleteAttribute('uv');
+      const cnt = g.attributes.position.count;
+      const ap = new Float32Array(cnt).fill(i);
+      g.setAttribute('aPrim', new THREE.BufferAttribute(ap, 1));
+      geos.push(g);
+    }
+    const merged = mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    merged.boundingSphere = new THREE.Sphere(new THREE.Vector3(x, gy + this.bodyY, z), this.bodyR + 0.4);
+    this.geo = merged;
+
+    const uniforms = {
+      uPrimA: { value: this.fA }, uPrimB: { value: this.fB },
+      uPrimC: { value: this.fC }, uPrimD: { value: this.fD },
+      uCount: { value: n },
+      uSunDir: sharedUniforms.uSunDir,
+    };
+    // PRIM_COUNT is the shared MAXP, same VSH/FSH as Critter — props reuse the already
+    // compiled WebGL programs, no extra shader compiles for the meadow
+    this.matBody = new THREE.ShaderMaterial({
+      defines: { PRIM_COUNT: MAXP },
+      vertexShader: VSH, fragmentShader: FSH_BODY,
+      uniforms: { ...uniforms, uIso: { value: 0 } },
+    });
+    this.matOutline = new THREE.ShaderMaterial({
+      defines: { PRIM_COUNT: MAXP },
+      vertexShader: VSH, fragmentShader: FSH_OUTLINE,
+      uniforms: { ...uniforms, uIso: { value: 0.016 }, uOutlineTint: { value: new THREE.Color(this.outlineTint) } },
+      side: THREE.BackSide,
+    });
+
+    this.group = new THREE.Group();
+    this.meshBody = new THREE.Mesh(this.geo, this.matBody);
+    this.meshOutline = new THREE.Mesh(this.geo, this.matOutline);
+    this.group.add(this.meshBody, this.meshOutline);
+    scene.add(this.group);
+  }
+
+  // trunk (1 round cone) + 2-4 overlapping canopy blobs clustered at the top
+  buildTree(x, z, gy, addPrim) {
+    const trunkH = rr(0.9, 1.4);
+    const bark = hsl(rr(30, 55), 0.28, rr(0.24, 0.32));
+    addPrim(bark, 0.07, 0.08, x, gy, z, x, gy + trunkH, z, 0.14, 0.10);
+    const topY = gy + trunkH;
+    const leafHue = rr(96, 132);
+    const nCanopy = 2 + (rng() * 3 | 0);
+    this.sway = { list: [] };
+    for (let i = 0; i < nCanopy; i++) {
+      const a = rng() * TAU, rad = rr(0.1, 0.34);
+      const cx = x + Math.sin(a) * rad, cz = z + Math.cos(a) * rad;
+      const rC = rr(0.32, 0.52);
+      const cy = topY + rr(-0.1, 0.2);
+      const leaf = hsl(leafHue + rr(-10, 10), rr(0.38, 0.52), rr(0.42, 0.54));
+      const idx = addPrim(leaf, 0.22, 0.10, cx, cy, cz, cx, cy + 0.02, cz, rC, rC * 0.96);
+      this.sway.list.push({ i: idx, bx: cx, bz: cz, phase: rng() * TAU });
+    }
+    this.outlineTint = '#26331b';
+  }
+
+  // 2-3 gray-green blobs, centers sunk below ground so they read as boulders
+  buildRock(x, z, gy, addPrim) {
+    const hue = rr(70, 100);
+    const nBlob = 2 + (rng() * 2 | 0);
+    for (let i = 0; i < nBlob; i++) {
+      const a = rng() * TAU, rad = i === 0 ? 0 : rr(0.15, 0.35);
+      const bx = x + Math.sin(a) * rad, bz = z + Math.cos(a) * rad;
+      const r = rr(0.22, 0.4);
+      const by = gy - r * rr(0.3, 0.4);
+      const col = hsl(hue + rr(-8, 8), rr(0.12, 0.22), rr(0.42, 0.55));
+      addPrim(col, 0.16, 0.06, bx, by, bz, bx, by + 0.02, bz, r, r * 0.97);
+    }
+    this.outlineTint = '#2c332a';
+  }
+
+  // stem + flattened cap + tiny white spot decals (colorOnly, flat not bumpy)
+  buildMushroom(x, z, gy, addPrim) {
+    const stemH = rr(0.2, 0.32);
+    const stemR = rr(0.045, 0.06);
+    const cream = hsl(42, 0.28, 0.82);
+    addPrim(cream, 0.03, 0.08, x, gy, z, x, gy + stemH, z, stemR, stemR * 0.82);
+    const capR = rr(0.15, 0.24);
+    const cap = hsl(pick([6, 18, 30]), rr(0.45, 0.6), rr(0.42, 0.52));
+    // the cap's wide end (r1=capR) is a full sphere of that radius centered on its own
+    // point, so it must sit ABOVE the stem top by ~capR (minus a small fuse overlap) or
+    // its own bulk swallows the whole stem instead of just kissing the tip
+    const capBaseY = gy + stemH + capR * 0.8;
+    const capTopY = capBaseY + capR * 0.7;
+    addPrim(cap, 0.05, 0.15, x, capBaseY, z, x, capTopY, z, capR, capR * 0.45);
+    const nSpots = 1 + (rng() < 0.5 ? 1 : 0);
+    for (let i = 0; i < nSpots; i++) {
+      // right at the cap's wide base ring, offset ~85% of capR out from the axis: a
+      // decal has to sit near the TRUE radius of the surface at its height (not a small
+      // fraction of it) or it just floats inside the dome with no vertex nearby to tint
+      const a = rng() * TAU, rad = capR * rr(0.78, 0.9);
+      const sx = x + Math.sin(a) * rad, sz = z + Math.cos(a) * rad;
+      const sy = capBaseY + capR * rr(0, 0.12), sr = rr(0.06, 0.09);
+      addPrim([1, 1, 1], 0.1, 0.1, sx, sy, sz, sx, sy + 0.006, sz, sr, sr * 0.97, 1, 1);
+    }
+    this.outlineTint = '#3a2015';
+  }
+
+  // 2-3 thin stems (small k so they don't dissolve), each topped with a colored head blob
+  buildFlower(x, z, gy, addPrim) {
+    const nStems = 2 + (rng() * 2 | 0);
+    const stemColor = hsl(110, 0.35, 0.34);
+    for (let i = 0; i < nStems; i++) {
+      const a = rng() * TAU, rad = rr(0, 0.08);
+      const sx = x + Math.sin(a) * rad, sz = z + Math.cos(a) * rad;
+      const h = rr(0.14, 0.24);
+      addPrim(stemColor, 0.03, 0.08, sx, gy, sz, sx, gy + h, sz, 0.02, 0.015);
+      const hr = rr(0.055, 0.09);
+      const headCol = hsl(rr(0, 360), 0.6, rr(0.6, 0.72));
+      // same fix as the mushroom cap: the head's wide end must sit ABOVE the stem tip
+      // by ~its own radius, or its bulk swallows the whole thin stem
+      const headBaseY = gy + h + hr * 0.75;
+      const headTopY = headBaseY + hr * 0.6;
+      addPrim(headCol, 0.045, 0.2, sx, headBaseY, sz, sx, headTopY, sz, hr, hr * 0.55);
+    }
+    this.outlineTint = '#243a1c';
+  }
+
+  dispose() {
+    scene.remove(this.group);
+    this.geo.dispose();
+    this.matBody.dispose();
+    this.matOutline.dispose();
+  }
+}
+
+// canopy sway: gentle sine offset on tree canopy blobs only, everything else in the
+// meadow is fully static (zero per-frame CPU cost beyond this one loop)
+let propTime = 0;
+function updateTrees(dt) {
+  propTime += dt;
+  for (const p of props) {
+    if (!p.sway) continue;
+    for (const s of p.sway.list) {
+      const off = Math.sin(propTime * 0.5 + s.phase) * 0.04;
+      const nx = s.bx + off, nz = s.bz + off * 0.7;
+      const o = s.i * 4;
+      p.fA[o] = nx; p.fA[o + 2] = nz;
+      p.fB[o] = nx; p.fB[o + 2] = nz;
+    }
+  }
+}
+
+function clearProps() {
+  for (const p of props) p.dispose();
+  props.length = 0;
+}
+
+// seeded ring scatter: majority outside the play area (r 6..14), a few sparse items
+// inside (r 3..6, never within 2.5 of spawn); deterministic per seed, re-scattered on reroll
+const PROP_RING = ['tree', 'tree', 'tree', 'rock', 'rock', 'mushroom', 'tree', 'rock'];
+function scatterMeadow() {
+  clearProps();
+  for (const kind of PROP_RING) {
+    const a = rng() * TAU, r = rr(6, 14);
+    props.push(new Prop(kind, Math.sin(a) * r, Math.cos(a) * r));
+  }
+  const nInner = 2 + (rng() * 2 | 0);
+  for (let i = 0; i < nInner; i++) {
+    const a = rng() * TAU, r = rr(3, 6);
+    props.push(new Prop(pick(['mushroom', 'flower']), Math.sin(a) * r, Math.cos(a) * r));
+  }
+}
+
 // ---------- palettes ----------
 function genPalette(hue, family) {
   family = family || pick(['pastel', 'pastel', 'pastel', 'dusty', 'twotone', 'contrast']);
@@ -1932,6 +2165,7 @@ function spawnArch(arch) {
 
 function rerollAll(seed) {
   reseed(seed !== undefined ? seed : (Math.random() * 1e9) | 0);
+  scatterMeadow();
   const old = critters.slice();
   critters.length = 0;
   for (const c of old) {
@@ -1957,6 +2191,9 @@ if (sharedRecipe && sharedRecipe.archetype) {
   spawnCritter(sharedRecipe, 0, 1.5, Math.PI);
   controls.target.set(0, 0.7, 1.5);
 }
+
+// meadow flora — seeded scatter, deterministic per ?seed=
+scatterMeadow();
 
 // ---------- input ----------
 const ray = new THREE.Raycaster();
@@ -2199,6 +2436,7 @@ let paused = false, stepQueue = 0;
 let fps = 60;
 window.CRITTERS = {
   list: critters,
+  props,
   spawn: arch => spawnArch(arch),
   spawnRecipe: (r, x = 0, z = 0) => spawnCritter(r, x, z, rng() * TAU),
   reroll: seed => rerollAll(seed),
@@ -2220,15 +2458,17 @@ window.CRITTERS = {
   _hearts: () => heartPool.filter(s => s.visible).length,
   _programs: () => renderer.info.programs.length,
   view: (i, theta = 0, dist = 3.2, h = 0.35) => {
-    const c = critters[i]; if (!c) return;
-    const cy = groundY(c.pos.x, c.pos.z) + c.airY + c.bodyY;
+    // negative i inspects a prop instead of a critter: -1 -> props[0], -2 -> props[1], ...
+    const c = i < 0 ? props[-i - 1] : critters[i];
+    if (!c) return;
+    const cy = groundY(c.pos.x, c.pos.z) + (c.airY || 0) + c.bodyY;
     controls.target.set(c.pos.x, cy, c.pos.z);
     camera.position.set(
       c.pos.x + Math.sin(theta) * dist,
       cy + dist * h,
       c.pos.z + Math.cos(theta) * dist);
   },
-  stats: () => ({ critters: critters.length, fps: Math.round(fps), prims: critters.reduce((s, c) => s + c.prims.length, 0), pad: pad.index >= 0, controlling: pad.critter ? pad.critter.arch : null }),
+  stats: () => ({ critters: critters.length, props: props.length, fps: Math.round(fps), prims: critters.reduce((s, c) => s + c.prims.length, 0), pad: pad.index >= 0, controlling: pad.critter ? pad.critter.arch : null }),
 };
 
 // ---------- main loop ----------
@@ -2242,6 +2482,7 @@ function tick() {
     updateGamepad(dt);
     separate(dt);
     for (const c of critters) c.update(dt);
+    updateTrees(dt);
     updateDust(dt);
     updateHearts(dt);
     updateRings(dt);
