@@ -33,9 +33,12 @@ thread, credited gladly).
 ## Controls
 
 - **click or tap the ground**: nearest critter comes to the spot
+- **click or tap a critter**: pet it (happy squash, hearts, chirp)
 - **drag**: orbit camera (wheel or pinch zooms; touch works everywhere)
-- **keys 1–5 or the on-screen buttons**: spawn biped / quadruped / multiped / hopper / flyer
+- **keys 1–6 or the on-screen buttons**: spawn biped / quadruped / multiped / hopper / flyer / serpent
 - **R or the dice button**: rerolls everyone (new random recipes, same archetypes)
+- **link button**: copies a share link for the nearest critter (full recipe in the URL; the scene seed is always in the URL too)
+- **speaker button**: procedural chirp sounds on/off
 - **? button**: about + credits
 
 ### Xbox controller
