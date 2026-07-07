@@ -83,7 +83,7 @@
 <body>
 <div id="app"></div>
 <div id="vig"></div>
-<div id="hint">click or tap the ground to call a critter &middot; drag to orbit &middot; buttons or keys 1&ndash;7 spawn &middot; R rerolls</div>
+<div id="hint">click or tap the ground to call a critter &middot; WASD or a gamepad drives one &middot; drag to orbit &middot; keys 1&ndash;7 spawn &middot; R rerolls</div>
 <div id="ui">
   <button data-act="b" title="spawn biped (1)">&#129503;</button>
   <button data-act="q" title="spawn quadruped (2)">&#128058;</button>
@@ -1307,11 +1307,16 @@ class Critter {
     const maxSpeed = R.motion.speed * this.size;
     this.seekTarget(dt, maxSpeed, 4);
 
-    // pad jump: front of the chain lifts ballistically
+    // pad dash: coil-spring lunge along the heading (soft burst, decays via seekTarget)
     if (this.controlled && this.wantJump && this.airY === 0) {
-      this.jumpVy = 3.0 * Math.sqrt(this.size);
+      const sx = Math.sin(this.heading), sz = Math.cos(this.heading);
+      this.vel.x += sx * 7.0 * this.size;
+      this.vel.z += sz * 7.0 * this.size;
+      this.jumpVy = 1.6 * Math.sqrt(this.size);
       this.airY = 0.001;
-      this.squashVel -= 3;
+      this.squashVel -= 3.5;
+      this.slitherT += 2.5;
+      spawnDust(this.pos.x - sx * 0.4, groundY(this.pos.x, this.pos.z) + 0.05, this.pos.z - sz * 0.4, 7, 0.3 * this.size, 0.2 * this.size, 0.7);
       sfx('hop');
     }
     this.wantJump = false;
@@ -1404,25 +1409,30 @@ class Critter {
         else { this.hState = 'crouch'; this.hT = 0; }
       }
     } else if (this.hState === 'crouch') {
-      squashTarget = 0.72;
+      squashTarget = this.bigHop ? 0.62 : 0.72;
       if (this.target) {
         const want = Math.atan2(this.target.x - this.pos.x, this.target.z - this.pos.z);
         this.heading = angleLerp(this.heading, want, Math.min(1, 10 * dt));
       }
-      if (this.hT > 0.16) {
+      if (this.hT > (this.bigHop ? 0.07 : 0.16)) { // dash winds up snappier
         this.hState = 'air'; this.hT = 0;
         const dx = (this.target ? this.target.x : this.pos.x) - this.pos.x;
         const dz = (this.target ? this.target.z : this.pos.z) - this.pos.z;
         const d = Math.sqrt(dx * dx + dz * dz) || 1;
-        const L = Math.min(R.motion.hopLen * this.size * (this.bigHop ? 1.6 : 1), d);
-        const T = 0.52 * (this.bigHop ? 1.25 : 1);
+        // A = DASH: way longer, flatter, faster than a travel hop (overshoots the target on purpose)
+        const L = this.bigHop ? R.motion.hopLen * this.size * 2.6 : Math.min(R.motion.hopLen * this.size, d);
+        const T = 0.52 * (this.bigHop ? 0.72 : 1);
+        this.dashAir = this.bigHop;
         this.bigHop = false;
         this.hVel.set(dx / d * L / T, g * T * 0.5, dz / d * L / T);
-        spawnDust(this.pos.x, groundY(this.pos.x, this.pos.z) + 0.03, this.pos.z, 4, 0.16 * this.size, 0.16 * this.size, 0.5);
+        spawnDust(this.pos.x, groundY(this.pos.x, this.pos.z) + 0.03, this.pos.z, this.dashAir ? 8 : 4, 0.16 * this.size, 0.16 * this.size, 0.5);
         sfx('hop');
       }
     } else if (this.hState === 'air') {
-      squashTarget = 1.24;
+      squashTarget = this.dashAir ? 1.38 : 1.24;
+      if (this.dashAir && Math.random() < 0.5) {
+        spawnDust(this.pos.x, groundY(this.pos.x, this.pos.z) + 0.05, this.pos.z, 1, 0.12 * this.size, 0.13 * this.size, 0.2);
+      }
       this.hVel.y -= g * dt;
       this.pos.x += this.hVel.x * dt;
       this.pos.z += this.hVel.z * dt;
@@ -1431,6 +1441,7 @@ class Critter {
       if (this.airY <= 0 && this.hVel.y < 0) {
         this.airY = 0;
         this.hState = 'land'; this.hT = 0;
+        this.dashAir = false;
         this.squashVel -= 5.5;
         spawnDust(this.pos.x, groundY(this.pos.x, this.pos.z) + 0.03, this.pos.z, 7, 0.22 * this.size, 0.18 * this.size, 0.6);
         sfx('land');
@@ -1459,7 +1470,13 @@ class Critter {
     const R = this.recipe;
     const speed = this.seekTarget(dt, R.motion.speed * this.size, 3.5);
     this.propAngle += dt * (11 + this.speedN * 9);
-    if (this.controlled && this.wantJump) { this.kickY += 0.55; this.squashVel -= 2; }
+    if (this.controlled && this.wantJump) {
+      // boost: pop up AND surge forward
+      this.kickY += 0.55; this.squashVel -= 2;
+      this.vel.x += Math.sin(this.heading) * 2.4 * this.size;
+      this.vel.z += Math.cos(this.heading) * 2.4 * this.size;
+      sfx('hop');
+    }
     this.wantJump = false;
     this.kickY *= Math.max(0, 1 - 2.5 * dt);
     const hover = 0.8 * this.size + this.kickY + Math.sin(this.time * 1.7) * 0.07 + Math.sin(this.time * 0.61) * 0.04;
@@ -2483,7 +2500,7 @@ function toast(msg) {
   toastTimer = setTimeout(() => { hintEl.innerHTML = HINT_DEFAULT; }, 2200);
 }
 async function shareCritter() {
-  const c = pad.critter || nearestCritterTo(controls.target.x, controls.target.z);
+  const c = (players[0] && players[0].critter) || nearestCritterTo(controls.target.x, controls.target.z);
   if (!c) return;
   const u = new URL(location.href);
   u.hash = 'r=' + encodeRecipe(c.recipe);
@@ -2492,132 +2509,222 @@ async function shareCritter() {
   catch { toast('link is in the address bar'); }
 }
 
-// ---------- gamepad (xbox) ----------
+// ---------- players (keyboard seat + up to 8 gamepads, local co-op) ----------
 const hintEl = document.getElementById('hint');
 if (matchMedia('(pointer: coarse)').matches) hintEl.textContent = 'tap the ground to call a critter';
 const HINT_DEFAULT = hintEl.innerHTML;
-const HINT_PAD = '\u{1F3AE} left stick move · A jump · LB/RB switch critter · right stick camera · triggers zoom';
-const pad = { index: -1, critter: null, prevButtons: [], hintTimer: 0, rx: 0, ry: 0, zoom: 0 };
+const HINT_PAD = '\u{1F3AE} left stick move · A jump/dash · LB/RB switch · right stick camera · triggers zoom';
+const HINT_KEYS = '\u{2328}\u{FE0F} WASD move · Space jump/dash · Tab switch critter · Esc release';
+const PLAYER_COLORS = ['#fffbe8', '#9ed6ff', '#ffb3cd', '#b5f0b5', '#ffe08a', '#d9b8ff', '#ffc9a3', '#a3fff0'];
+const players = []; // { kind:'pad'|'keys', index, critter, prevButtons, ring, rx, ry, zoom }
+let hintTimer = 0;
 
-const playerRing = new THREE.Mesh(
-  new THREE.RingGeometry(0.82, 0.95, 44),
-  new THREE.MeshBasicMaterial({ color: '#fffbe8', transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide }));
-playerRing.geometry.rotateX(-Math.PI / 2);
-playerRing.renderOrder = 2;
-playerRing.visible = false;
-scene.add(playerRing);
+function makePlayerRing(color) {
+  const m = new THREE.Mesh(
+    new THREE.RingGeometry(0.82, 0.95, 44),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide }));
+  m.geometry.rotateX(-Math.PI / 2);
+  m.renderOrder = 2;
+  m.visible = false;
+  scene.add(m);
+  return m;
+}
 
-function nearestCritterTo(x, z) {
+function nearestCritterTo(x, z, freeOnly = false) {
   let best = null, bd = 1e9;
   for (const c of critters) {
+    if (freeOnly && possessedBy(c)) continue;
     const d = (c.pos.x - x) ** 2 + (c.pos.z - z) ** 2;
     if (d < bd) { bd = d; best = c; }
   }
   return best;
 }
 
-function padPossess(c) {
-  if (pad.critter) { pad.critter.controlled = false; pad.critter.input.set(0, 0, 0); }
-  pad.critter = c;
+function possessedBy(c) { return players.find(p => p.critter === c) || null; }
+
+function possess(p, c) {
+  if (c && possessedBy(c)) return; // no stealing another player's critter
+  if (p.critter) { p.critter.controlled = false; p.critter.input.set(0, 0, 0); }
+  p.critter = c;
   if (c) { c.controlled = true; c.target = null; c.squashVel -= 1.6; }
 }
 
-function padConnect(i) {
-  pad.index = i;
-  pad.prevButtons.length = 0;
-  hintEl.textContent = '\u{1F3AE} controller connected — you are the critter!';
-  pad.hintTimer = 2.2;
-  padPossess(nearestCritterTo(controls.target.x, controls.target.z));
+function cyclePlayer(p, dir) {
+  if (!p.critter || critters.length < 2) return;
+  let idx = critters.indexOf(p.critter);
+  for (let step = 0; step < critters.length - 1; step++) {
+    idx = (idx + dir + critters.length) % critters.length;
+    if (!possessedBy(critters[idx])) { possess(p, critters[idx]); return; }
+  }
 }
 
-function padDisconnect() {
-  pad.index = -1;
-  padPossess(null);
-  playerRing.visible = false;
-  hintEl.innerHTML = HINT_DEFAULT;
+function addPlayer(kind, index = -1) {
+  const p = {
+    kind, index, critter: null, prevButtons: [],
+    ring: makePlayerRing(PLAYER_COLORS[players.length % PLAYER_COLORS.length]),
+    rx: 0, ry: 0, zoom: 0,
+  };
+  players.push(p);
+  possess(p, nearestCritterTo(controls.target.x, controls.target.z, true));
+  hintEl.textContent = kind === 'pad'
+    ? '\u{1F3AE} controller connected \u{2014} you are the critter!'
+    : '\u{2328}\u{FE0F} WASD engaged \u{2014} you are the critter!';
+  hintTimer = 2.2;
+  return p;
 }
 
-addEventListener('gamepadconnected', e => { if (pad.index < 0) padConnect(e.gamepad.index); });
-addEventListener('gamepaddisconnected', e => { if (e.gamepad.index === pad.index) padDisconnect(); });
+function removePlayer(p) {
+  possess(p, null);
+  scene.remove(p.ring);
+  p.ring.geometry.dispose(); p.ring.material.dispose();
+  players.splice(players.indexOf(p), 1);
+  if (!players.length) hintEl.innerHTML = HINT_DEFAULT;
+}
 
-function updateGamepad(dt) {
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  // late/silent connects: events are unreliable across browsers, so also scan
-  if (pad.index < 0) {
-    for (let i = 0; i < pads.length; i++) {
-      if (pads[i] && pads[i].connected) { padConnect(i); break; }
-    }
-  }
-  const gp = pad.index >= 0 ? pads[pad.index] : null;
-  if (pad.index >= 0 && (!gp || !gp.connected)) { padDisconnect(); return; }
-  if (!gp) return;
+addEventListener('gamepadconnected', e => {
+  if (!players.find(p => p.kind === 'pad' && p.index === e.gamepad.index)) addPlayer('pad', e.gamepad.index);
+});
+addEventListener('gamepaddisconnected', e => {
+  const p = players.find(pl => pl.kind === 'pad' && pl.index === e.gamepad.index);
+  if (p) removePlayer(p);
+});
 
-  if (pad.hintTimer > 0) {
-    pad.hintTimer -= dt;
-    if (pad.hintTimer <= 0) hintEl.textContent = HINT_PAD;
+// keyboard seat: first WASD/Space press possesses the nearest free critter
+const keysDown = new Set();
+const keyPlayer = () => players.find(p => p.kind === 'keys') || null;
+addEventListener('keydown', e => {
+  const k = e.code;
+  if (k === 'Tab') {
+    e.preventDefault();
+    const kp = keyPlayer();
+    if (kp) cyclePlayer(kp, e.shiftKey ? -1 : 1);
+    return;
   }
-  // possessed critter got rerolled/evicted: grab the nearest survivor
-  if (!pad.critter || !critters.includes(pad.critter)) {
-    padPossess(nearestCritterTo(controls.target.x, controls.target.z));
-    if (!pad.critter) return;
-  }
-  const c = pad.critter;
+  if (!['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(k)) return;
+  if (e.repeat) return;
+  e.preventDefault();
+  keysDown.add(k);
+  let kp = keyPlayer();
+  if (!kp) kp = addPlayer('keys');
+  if (k === 'Space' && kp.critter) kp.critter.wantJump = true;
+});
+addEventListener('keyup', e => keysDown.delete(e.code));
 
-  // left stick -> camera-relative run direction (radial deadzone)
-  const lx = gp.axes[0] || 0, ly = gp.axes[1] || 0;
-  const m = Math.hypot(lx, ly);
-  let s = 0;
-  if (m > 0.18) s = Math.min(1, (m - 0.18) / 0.78) / m;
+function camBasis() {
   V[0].set(0, 0, -1).applyQuaternion(camera.quaternion); V[0].y = 0; V[0].normalize();
   V[1].set(1, 0, 0).applyQuaternion(camera.quaternion); V[1].y = 0; V[1].normalize();
-  c.input.set(
-    (V[1].x * lx - V[0].x * ly) * s, 0,
-    (V[1].z * lx - V[0].z * ly) * s);
+}
 
-  // buttons (edge-triggered)
-  const btn = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
-  const edge = i => btn(i) && !pad.prevButtons[i];
-  if (edge(0)) c.wantJump = true;                                  // A
-  if (edge(4) || edge(5)) {                                        // LB/RB cycle
-    let idx = critters.indexOf(c) + (edge(5) ? 1 : -1);
-    idx = (idx + critters.length) % critters.length;
-    padPossess(critters[idx]);
+function updatePlayers(dt) {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  // hot-plug scan: events are unreliable across browsers, so also poll every frame
+  for (let i = 0; i < pads.length; i++) {
+    if (pads[i] && pads[i].connected && !players.find(p => p.kind === 'pad' && p.index === i)) addPlayer('pad', i);
   }
-  for (let i = 0; i < gp.buttons.length; i++) pad.prevButtons[i] = gp.buttons[i].pressed;
-
-  // right stick / triggers for the camera step
-  pad.rx = Math.abs(gp.axes[2] || 0) > 0.18 ? gp.axes[2] : 0;
-  pad.ry = Math.abs(gp.axes[3] || 0) > 0.18 ? gp.axes[3] : 0;
-  pad.zoom = ((gp.buttons[7] ? gp.buttons[7].value : 0) - (gp.buttons[6] ? gp.buttons[6].value : 0));
+  if (hintTimer > 0) {
+    hintTimer -= dt;
+    if (hintTimer <= 0) hintEl.textContent = players.some(p => p.kind === 'pad') ? HINT_PAD : HINT_KEYS;
+  }
+  camBasis();
+  for (let pi = players.length - 1; pi >= 0; pi--) {
+    const p = players[pi];
+    if (p.kind === 'pad') {
+      const gp = pads[p.index];
+      if (!gp || !gp.connected) { removePlayer(p); continue; }
+      if (!p.critter || !critters.includes(p.critter)) {
+        possess(p, nearestCritterTo(controls.target.x, controls.target.z, true));
+        if (!p.critter) continue;
+      }
+      const c = p.critter;
+      // left stick -> camera-relative run direction (radial deadzone)
+      const lx = gp.axes[0] || 0, ly = gp.axes[1] || 0;
+      const m = Math.hypot(lx, ly);
+      let s = 0;
+      if (m > 0.18) s = Math.min(1, (m - 0.18) / 0.78) / m;
+      c.input.set(
+        (V[1].x * lx - V[0].x * ly) * s, 0,
+        (V[1].z * lx - V[0].z * ly) * s);
+      // buttons (edge-triggered)
+      const btn = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
+      const edge = i => btn(i) && !p.prevButtons[i];
+      if (edge(0)) c.wantJump = true;                                // A: jump/dash per archetype
+      if (edge(4)) cyclePlayer(p, -1);                               // LB
+      if (edge(5)) cyclePlayer(p, 1);                                // RB
+      for (let i = 0; i < gp.buttons.length; i++) p.prevButtons[i] = gp.buttons[i].pressed;
+      // right stick / triggers for the camera step
+      p.rx = Math.abs(gp.axes[2] || 0) > 0.18 ? gp.axes[2] : 0;
+      p.ry = Math.abs(gp.axes[3] || 0) > 0.18 ? gp.axes[3] : 0;
+      p.zoom = ((gp.buttons[7] ? gp.buttons[7].value : 0) - (gp.buttons[6] ? gp.buttons[6].value : 0));
+    } else { // keyboard seat
+      if (!p.critter || !critters.includes(p.critter)) {
+        possess(p, nearestCritterTo(controls.target.x, controls.target.z, true));
+        if (!p.critter) continue;
+      }
+      const ix = (keysDown.has('KeyD') ? 1 : 0) - (keysDown.has('KeyA') ? 1 : 0);
+      const iz = (keysDown.has('KeyS') ? 1 : 0) - (keysDown.has('KeyW') ? 1 : 0);
+      if (ix || iz) {
+        const m = Math.hypot(ix, iz);
+        p.critter.input.set(
+          (V[1].x * ix - V[0].x * iz) / m, 0,
+          (V[1].z * ix - V[0].z * iz) / m);
+        p.wasDriving = true;
+      } else if (p.wasDriving) {
+        // only zero input that WE wrote: leaves the debug API free to drive critters
+        p.critter.input.set(0, 0, 0);
+        p.wasDriving = false;
+      }
+    }
+  }
 }
 
 const SPH = new THREE.Spherical();
-function updatePadCamera(dt) {
-  const c = pad.critter;
-  if (!c) { playerRing.visible = false; return; }
-  // pulsing marker under your critter
-  const gy = groundY(c.pos.x, c.pos.z);
-  playerRing.visible = true;
-  playerRing.position.set(c.pos.x, gy + 0.03, c.pos.z);
-  alignToGround(playerRing, c.pos.x, c.pos.z);
-  const ps = c.bodyR * 1.9 * (1 + 0.05 * Math.sin(c.time * 4));
-  playerRing.scale.set(ps, 1, ps);
-  playerRing.material.opacity = 0.3 + 0.08 * Math.sin(c.time * 4);
-  // soft follow: shift camera and target together, orbit angle preserved
-  V[2].set(c.pos.x, gy + c.airY + c.bodyY, c.pos.z);
+function updatePlayersCamera(dt) {
+  // rings + centroid + spread of everyone possessed
+  let n = 0, spread = 0;
+  for (const p of players) {
+    const c = p.critter;
+    if (!c) { p.ring.visible = false; continue; }
+    const gy = groundY(c.pos.x, c.pos.z);
+    p.ring.visible = true;
+    p.ring.position.set(c.pos.x, gy + 0.03, c.pos.z);
+    alignToGround(p.ring, c.pos.x, c.pos.z);
+    const ps = c.bodyR * 1.9 * (1 + 0.05 * Math.sin(c.time * 4));
+    p.ring.scale.set(ps, 1, ps);
+    p.ring.material.opacity = 0.3 + 0.08 * Math.sin(c.time * 4);
+    V[5].set(c.pos.x, gy + c.airY + c.bodyY, c.pos.z);
+    if (n === 0) V[2].copy(V[5]); else V[2].add(V[5]);
+    n++;
+  }
+  if (!n) return;
+  V[2].multiplyScalar(1 / n);
+  for (const p of players) {
+    if (!p.critter) continue;
+    const dx = p.critter.pos.x - V[2].x, dz = p.critter.pos.z - V[2].z;
+    spread = Math.max(spread, Math.hypot(dx, dz));
+  }
+  // soft follow the group centroid: camera and target shift together
   V[3].subVectors(V[2], controls.target).multiplyScalar(Math.min(1, 5 * dt));
   controls.target.add(V[3]);
   camera.position.add(V[3]);
-  // right stick orbits, triggers zoom
-  if (pad.rx || pad.ry || pad.zoom) {
-    V[4].subVectors(camera.position, controls.target);
-    SPH.setFromVector3(V[4]);
-    SPH.theta -= pad.rx * 2.6 * dt;
-    SPH.phi = clamp(SPH.phi - pad.ry * 1.8 * dt, 0.25, 1.5);
-    SPH.radius = clamp(SPH.radius - pad.zoom * 7 * dt, 2.8, 18);
-    V[4].setFromSpherical(SPH);
-    camera.position.copy(controls.target).add(V[4]);
+  // orbit/zoom: any pad's right stick + triggers (first active wins)
+  let rx = 0, ry = 0, zoom = 0;
+  for (const p of players) {
+    if (p.rx || p.ry || p.zoom) { rx = p.rx; ry = p.ry; zoom = p.zoom; break; }
   }
+  V[4].subVectors(camera.position, controls.target);
+  SPH.setFromVector3(V[4]);
+  if (rx || ry || zoom) {
+    SPH.theta -= rx * 2.6 * dt;
+    SPH.phi = clamp(SPH.phi - ry * 1.8 * dt, 0.25, 1.5);
+    SPH.radius = clamp(SPH.radius - zoom * 7 * dt, 2.8, 26);
+  }
+  if (n > 1) {
+    // co-op: zoom out enough to keep every player's critter in frame
+    const fitR = clamp(5.5 + spread * 1.3, 4.5, 26);
+    if (SPH.radius < fitR) SPH.radius = lerp(SPH.radius, fitR, Math.min(1, 3 * dt));
+  }
+  V[4].setFromSpherical(SPH);
+  camera.position.copy(controls.target).add(V[4]);
 }
 
 // ---------- separation ----------
@@ -2667,8 +2774,12 @@ window.CRITTERS = {
   pause: () => { paused = true; },
   resume: () => { paused = false; },
   step: (ms = 16) => { stepQueue = ms / 1000; },
-  possess: i => padPossess(critters[i] || null),
-  release: () => padPossess(null),
+  possess: i => {
+    const kp = players.find(p => p.kind === 'keys') || addPlayer('keys');
+    possess(kp, critters[i] || null);
+  },
+  release: () => { for (const p of players.slice()) removePlayer(p); },
+  players: () => players.map(p => ({ kind: p.kind, index: p.index, arch: p.critter ? p.critter.arch : null })),
   share: () => shareCritter(),
   _enc: r => encodeRecipe(r),
   _hearts: () => heartPool.filter(s => s.visible).length,
@@ -2684,7 +2795,7 @@ window.CRITTERS = {
       cy + dist * h,
       c.pos.z + Math.cos(theta) * dist);
   },
-  stats: () => ({ critters: critters.length, props: props.length, fps: Math.round(fps), prims: critters.reduce((s, c) => s + c.prims.length, 0), pad: pad.index >= 0, controlling: pad.critter ? pad.critter.arch : null }),
+  stats: () => ({ critters: critters.length, props: props.length, fps: Math.round(fps), prims: critters.reduce((s, c) => s + c.prims.length, 0), players: players.length, pad: players.some(p => p.kind === 'pad'), controlling: players[0] && players[0].critter ? players[0].critter.arch : null }),
 };
 
 // ---------- main loop ----------
@@ -2695,14 +2806,14 @@ function tick() {
   if (paused) { dt = stepQueue; stepQueue = 0; }
   if (dt > 0) {
     fps = fps * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
-    updateGamepad(dt);
+    updatePlayers(dt);
     separate(dt);
     for (const c of critters) c.update(dt);
     updateTrees(dt);
     updateDust(dt);
     updateHearts(dt);
     updateRings(dt);
-    updatePadCamera(dt);
+    updatePlayersCamera(dt);
   }
   controls.update();
   renderer.render(scene, camera);
