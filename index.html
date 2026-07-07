@@ -83,13 +83,14 @@
 <body>
 <div id="app"></div>
 <div id="vig"></div>
-<div id="hint">click or tap the ground to call a critter &middot; drag to orbit &middot; buttons or keys 1&ndash;5 spawn &middot; R rerolls</div>
+<div id="hint">click or tap the ground to call a critter &middot; drag to orbit &middot; buttons or keys 1&ndash;6 spawn &middot; R rerolls</div>
 <div id="ui">
   <button data-act="b" title="spawn biped (1)">&#129503;</button>
   <button data-act="q" title="spawn quadruped (2)">&#128058;</button>
   <button data-act="m" title="spawn multiped (3)">&#128375;&#65039;</button>
   <button data-act="h" title="spawn hopper (4)">&#128007;</button>
   <button data-act="f" title="spawn flyer (5)">&#128029;</button>
+  <button data-act="s" title="spawn serpent (6)">&#128013;</button>
   <span class="ui-sep"></span>
   <button data-act="reroll" title="reroll everyone (R)">&#127922;</button>
   <button data-act="share" title="copy a link to the nearest critter">&#128279;</button>
@@ -648,29 +649,53 @@ class Critter {
       return this.prims.length - 1;
     };
 
-    const bodyR1 = R.body.r1 * S, bodyR2 = R.body.r2 * S;
-    const bodyLen = R.body.len * S;
-    const bodyY = R.body.y * S;
-    this.bodyY = bodyY;
-    this.bodyR = Math.max(bodyR1, bodyR2);
-    const kBody = 0.24 * S;
-
-    // --- body (1 round cone along +Z or +Y) ---
-    this.iBody = addPrim(P.base, kBody, 0.14);
-    this.bodyA = new THREE.Vector3();
-    this.bodyB = new THREE.Vector3();
-    if (R.body.upright) {
-      this.bodyA.set(0, bodyY, 0);
-      this.bodyB.set(0, bodyY + bodyLen, R.body.topZ * S || 0);
-    } else {
-      this.bodyA.set(0, bodyY + (R.body.rearLift || 0) * S, -bodyLen / 2);
-      this.bodyB.set(0, bodyY, bodyLen / 2);
+    // --- serpent: chain of segments trailing the head's path (no single body prim) ---
+    this.chain = null;
+    if (R.archetype === 'serpent') {
+      const n = R.body.segs;
+      this.segLen = (R.body.len * S) / n;
+      this.chain = [];
+      const dirX = Math.sin(this.heading), dirZ = Math.cos(this.heading);
+      for (let i = 0; i <= n; i++) {
+        const r = lerp(R.body.r0, R.body.r1, i / n) * S;
+        this.chain.push({
+          i: i < n ? addPrim(P.base, 0.15 * S, 0.14) : -1,
+          r, wx: 0, wy: 0, wz: 0,
+          pos: new THREE.Vector3(this.pos.x - dirX * this.segLen * i, 0, this.pos.z - dirZ * this.segLen * i),
+        });
+      }
+      this.pathHist = [];
+      for (let i = 0; i < 45; i++) this.pathHist.push(new THREE.Vector3(this.pos.x - dirX * 0.1 * i, 0, this.pos.z - dirZ * 0.1 * i));
+      this.slitherT = rng() * TAU;
+      this.bodyR = R.body.r0 * S;
+      this.bodyY = R.body.r0 * S;
     }
-    this.bodyRA = bodyR1; this.bodyRB = bodyR2;
+
+    if (!this.chain) {
+      const bodyR1 = R.body.r1 * S, bodyR2 = R.body.r2 * S;
+      const bodyLen = R.body.len * S;
+      const bodyY = R.body.y * S;
+      this.bodyY = bodyY;
+      this.bodyR = Math.max(bodyR1, bodyR2);
+      const kBody = 0.24 * S;
+
+      // --- body (1 round cone along +Z or +Y) ---
+      this.iBody = addPrim(P.base, kBody, 0.14);
+      this.bodyA = new THREE.Vector3();
+      this.bodyB = new THREE.Vector3();
+      if (R.body.upright) {
+        this.bodyA.set(0, bodyY, 0);
+        this.bodyB.set(0, bodyY + bodyLen, R.body.topZ * S || 0);
+      } else {
+        this.bodyA.set(0, bodyY + (R.body.rearLift || 0) * S, -bodyLen / 2);
+        this.bodyB.set(0, bodyY, bodyLen / 2);
+      }
+      this.bodyRA = bodyR1; this.bodyRB = bodyR2;
+    }
 
     // --- belly patch ---
     this.iBelly = -1;
-    if (R.belly) {
+    if (R.belly && !this.chain) {
       this.iBelly = addPrim(P.belly, 0.16 * S, 0.1, 1, 1);
       this.bellyLocal = new THREE.Vector3(R.belly[0] * S, R.belly[1] * S, R.belly[2] * S);
       this.bellyR = R.belly[3] * S;
@@ -937,6 +962,7 @@ class Critter {
     if (this.spawnT < 1) this.spawnT = Math.min(1, this.spawnT + dt * 2.2);
     if (this.arch === 'hopper') this.updateHopper(dt);
     else if (this.arch === 'flyer') this.updateFlyer(dt);
+    else if (this.arch === 'serpent') this.updateSerpent(dt);
     else this.updateWalker(dt);
     this.updateFrame(dt, false);
     this.updateEyes(dt);
@@ -1119,6 +1145,77 @@ class Critter {
     }
   }
 
+  updateSerpent(dt) {
+    if (!this.controlled) this.wander(dt);
+    const R = this.recipe;
+    const maxSpeed = R.motion.speed * this.size;
+    this.seekTarget(dt, maxSpeed, 4);
+
+    // pad jump: front of the chain lifts ballistically
+    if (this.controlled && this.wantJump && this.airY === 0) {
+      this.jumpVy = 3.0 * Math.sqrt(this.size);
+      this.airY = 0.001;
+      this.squashVel -= 3;
+    }
+    this.wantJump = false;
+    if (this.airY > 0) {
+      this.jumpVy -= 13 * dt;
+      this.airY += this.jumpVy * dt;
+      if (this.airY <= 0) {
+        this.airY = 0; this.jumpVy = 0; this.squashVel -= 3;
+        spawnDust(this.pos.x, groundY(this.pos.x, this.pos.z) + 0.04, this.pos.z, 6, 0.22 * this.size, 0.18 * this.size, 0.6);
+      }
+    }
+
+    this.slitherT += dt * R.motion.tempo * (2.2 + this.speedN * 7);
+
+    // record the head's ground path (newest first, spaced ~4cm)
+    const hp = this.pathHist;
+    if ((hp[0].x - this.pos.x) ** 2 + (hp[0].z - this.pos.z) ** 2 > 0.0016) {
+      const v = hp.length > 110 ? hp.pop() : new THREE.Vector3();
+      v.set(this.pos.x, 0, this.pos.z);
+      hp.unshift(v);
+    }
+
+    // resample the chain along the recorded path, segLen apart
+    const n = this.chain.length - 1;
+    this.chain[0].pos.set(this.pos.x, 0, this.pos.z);
+    let hi = 0, acc = 0;
+    for (let s = 1; s <= n; s++) {
+      const want = s * this.segLen;
+      while (hi < hp.length - 1) {
+        const d = hp[hi].distanceTo(hp[hi + 1]);
+        if (acc + d >= want) break;
+        acc += d; hi++;
+      }
+      const c = this.chain[s];
+      if (hi < hp.length - 1) {
+        const d = hp[hi].distanceTo(hp[hi + 1]) || 1;
+        V[2].lerpVectors(hp[hi], hp[hi + 1], clamp((want - acc) / d, 0, 1));
+        c.pos.lerp(V[2], Math.min(1, 14 * dt));
+      } else {
+        c.pos.lerp(hp[hp.length - 1], Math.min(1, 14 * dt)); // path ran out: bunch up at the tail end
+      }
+    }
+
+    // body pose: yaw only, a touch of roll into turns
+    this.lift = this.dip;
+    this.pitch = 0;
+    this.roll = clamp(-this.headingVel * 0.03, -0.25, 0.25);
+    E1.set(this.pitch, this.heading, this.roll, 'YXZ');
+    this.quat.setFromEuler(E1);
+    E1.set(0, this.heading, 0, 'YXZ');
+    this.yawQuat.setFromEuler(E1);
+
+    // squash + dip springs (petting, landings)
+    this.squashVel += (1 - this.squash) * 90 * dt;
+    this.squashVel *= Math.max(0, 1 - 12 * dt);
+    this.squash = clamp(this.squash + this.squashVel * dt, 0.55, 1.45);
+    this.dipVel += (0 - this.dip) * 160 * dt;
+    this.dipVel *= Math.max(0, 1 - 14 * dt);
+    this.dip += this.dipVel * dt;
+  }
+
   updateHopper(dt) {
     if (this.controlled) {
       // steer hops with the stick; A = big hop
@@ -1234,9 +1331,30 @@ class Critter {
     const rB = breath * pop;
 
     // body
-    this.toWorld(V[4], this.bodyA, this.lift);
-    this.toWorld(V[5], this.bodyB, this.lift);
-    this.setPrim(this.iBody, V[4], V[5], this.bodyRA * rB, this.bodyRB * rB);
+    if (this.chain) {
+      const n = this.chain.length - 1;
+      const amp = 0.13 * S * (0.25 + this.speedN * 0.75);
+      for (let s = 0; s <= n; s++) {
+        const c = this.chain[s];
+        const q = this.chain[Math.min(s + 1, n)], p = this.chain[Math.max(s - 1, 0)];
+        let px = q.pos.z - p.pos.z, pz = -(q.pos.x - p.pos.x); // xz perpendicular to local direction
+        const pl = Math.hypot(px, pz) || 1; px /= pl; pz /= pl;
+        const sway = Math.sin(this.slitherT - s * 1.1) * amp * Math.min(1, s / 1.5);
+        const lift = this.airY * Math.max(0, 1 - s / (n * 0.7));
+        c.wx = c.pos.x + px * sway;
+        c.wz = c.pos.z + pz * sway;
+        c.wy = groundY(c.wx, c.wz) + c.r * 0.92 * rB * this.squash + lift + this.lift * 0.4;
+      }
+      for (let s = 0; s < n; s++) {
+        const a = this.chain[s], b = this.chain[s + 1];
+        V[4].set(a.wx, a.wy, a.wz); V[5].set(b.wx, b.wy, b.wz);
+        this.setPrim(a.i, V[4], V[5], a.r * rB, b.r * rB);
+      }
+    } else {
+      this.toWorld(V[4], this.bodyA, this.lift);
+      this.toWorld(V[5], this.bodyB, this.lift);
+      this.setPrim(this.iBody, V[4], V[5], this.bodyRA * rB, this.bodyRB * rB);
+    }
     if (this.iBelly >= 0) {
       this.toWorld(V[4], this.bellyLocal, this.lift);
       V[5].copy(V[4]); V[5].y += 0.01;
@@ -1575,6 +1693,17 @@ function genRecipe(arch) {
     R.eyes = { count: rng() < 0.15 ? 1 : 2, r: rr(0.065, 0.085), spread: r1 * 0.4, y: R.body.y + R.body.len * 0.5, z: r1 * rr(0.72, 0.82) };
     R.motion = { hopLen: rr(1.2, 1.9), tempo: 1, bob: 0 };
   }
+  else if (arch === 'serpent') {
+    const r0 = rr(0.17, 0.26);
+    R.body = { segs: 7 + (rng() * 4 | 0), r0, r1: r0 * rr(0.18, 0.32), len: rr(1.7, 2.6) };
+    R.head = { r: r0 * rr(1.15, 1.45), len: rr(0.28, 0.4), neckY: r0 * 1.15, neckZ: 0.12, neckLen: rr(0.1, 0.2), pitch: rr(-0.1, 0.05), k: 0.16 };
+    if (rng() < 0.5) R.decos = [
+      { frame: 'head', a: [-0.07, R.head.r * 0.75, -0.02], b: [-0.1, R.head.r * 0.75 + rr(0.08, 0.18), -0.06], r1: 0.045, r2: 0.03, color: 'accent', k: 0.05 },
+      { frame: 'head', a: [0.07, R.head.r * 0.75, -0.02], b: [0.1, R.head.r * 0.75 + rr(0.08, 0.18), -0.06], r1: 0.045, r2: 0.03, color: 'accent', k: 0.05 },
+    ];
+    R.eyes = { count: rng() < 0.12 ? 1 : 2, r: rr(0.055, 0.08), spread: R.head.r * 0.55, y: R.head.r * 0.25, z: R.head.len * 0.4 };
+    R.motion = { speed: rr(1.2, 1.8), tempo: rr(0.9, 1.3), bob: 0 };
+  }
   else { // flyer
     const r1 = rr(0.3, 0.4);
     R.body = { upright: true, len: rr(0.4, 0.52), r1, r2: r1 * rr(0.6, 0.8), y: 0.3, topZ: rr(-0.05, 0) };
@@ -1593,7 +1722,7 @@ function genRecipe(arch) {
 }
 
 // ---------- spawn / reroll ----------
-const ARCHES = ['biped', 'quadruped', 'multiped', 'hopper', 'flyer'];
+const ARCHES = ['biped', 'quadruped', 'multiped', 'hopper', 'flyer', 'serpent'];
 
 function spawnCritter(recipe, x, z, heading) {
   if (critters.length >= 14) {
@@ -1665,7 +1794,7 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (best) best.callTo(p.x, p.z);
 });
 addEventListener('keydown', e => {
-  if (e.key >= '1' && e.key <= '5') spawnArch(ARCHES[+e.key - 1]);
+  if (e.key >= '1' && e.key <= '6') spawnArch(ARCHES[+e.key - 1]);
   else if (e.key === 'r' || e.key === 'R') rerollAll();
 });
 
@@ -1677,7 +1806,7 @@ function toggleCredits(force) {
 document.getElementById('credits-close').addEventListener('click', () => toggleCredits(false));
 creditsEl.addEventListener('click', e => { if (e.target === creditsEl) toggleCredits(false); });
 addEventListener('keydown', e => { if (e.key === 'Escape') toggleCredits(false); });
-const UI_ACTS = { b: 'biped', q: 'quadruped', m: 'multiped', h: 'hopper', f: 'flyer' };
+const UI_ACTS = { b: 'biped', q: 'quadruped', m: 'multiped', h: 'hopper', f: 'flyer', s: 'serpent' };
 document.getElementById('ui').addEventListener('click', e => {
   const act = e.target.closest('button')?.dataset.act;
   if (!act) return;
