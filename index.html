@@ -807,7 +807,8 @@ class Critter {
     this.decos = [];
     if (R.decos) {
       for (const D of R.decos) {
-        const i = addPrim(P[D.color] || P.accent, (D.k || 0.08) * S, D.gloss || 0.2);
+        const col = Array.isArray(D.color) ? D.color : (P[D.color] || P.accent);
+        const i = addPrim(col, (D.k || 0.08) * S, D.gloss || 0.2, D.noOutline || 0, D.colorOnly || 0);
         this.decos.push({
           i, frame: D.frame || 'body',
           a: new THREE.Vector3(D.a[0] * S, D.a[1] * S, D.a[2] * S),
@@ -1533,14 +1534,19 @@ function angleDiff(a, b) {
 }
 
 // ---------- palettes ----------
-function genPalette(hue) {
+function genPalette(hue, family) {
+  family = family || pick(['pastel', 'pastel', 'pastel', 'dusty', 'twotone', 'contrast']);
+  let s = 0.52, l = 0.55, bellyHue = hue + 8, accL = 0.50;
+  if (family === 'dusty') { s = 0.30; l = 0.50; }
+  else if (family === 'twotone') { bellyHue = hue + 150; }
+  else if (family === 'contrast') { l = 0.42; accL = 0.68; }
   return {
-    base: hsl(hue, 0.52, 0.55),
-    belly: hsl(hue + 8, 0.48, 0.68),
-    limb: hsl(hue - 6, 0.50, 0.47),
-    dark: hsl(hue + 14, 0.40, 0.23),
-    accent: hsl(hue + 140 + rng() * 80, 0.55, 0.50),
-    spot: hsl(hue + 4, 0.50, 0.66),
+    base: hsl(hue, s, l),
+    belly: hsl(bellyHue, Math.min(0.48, s), l + 0.13),
+    limb: hsl(hue - 6, s * 0.96, l - 0.08),
+    dark: hsl(hue + 14, s * 0.77, 0.23),
+    accent: hsl(hue + 140 + rng() * 80, 0.55, accL),
+    spot: hsl(bellyHue - 4, Math.min(0.5, s), l + 0.11),
     outline: '#' + new THREE.Color().setHSL(((hue % 360) + 360) % 360 / 360, 0.45, 0.20).getHexString(),
   };
 }
@@ -1718,6 +1724,40 @@ function genRecipe(arch) {
     if (R.eyes.count === 1) R.eyes.spread = 0;
     R.motion = { speed: rr(1.8, 2.4), tempo: 1, bob: 0 };
   }
+
+  // --- bonus decoration rolls (all archetypes) ---
+  R.decos = R.decos || [];
+  if (R.head && rng() < 0.15) { // horns
+    const hl = rr(0.1, 0.24), hc = pick(['dark', 'accent', 'base']);
+    R.decos.push(
+      { frame: 'head', a: [-0.09, R.head.r * 0.62, -0.03], b: [-0.14, R.head.r * 0.62 + hl, -0.1], r1: 0.05, r2: 0.028, color: hc, k: 0.05 },
+      { frame: 'head', a: [0.09, R.head.r * 0.62, -0.03], b: [0.14, R.head.r * 0.62 + hl, -0.1], r1: 0.05, r2: 0.028, color: hc, k: 0.05 });
+  } else if (R.head && rng() < 0.12) { // head crest
+    const nC = 2 + (rng() * 3 | 0), cr = rr(0.045, 0.075);
+    for (let i = 0; i < nC; i++) {
+      const z = R.head.len * (0.25 - 0.28 * i / Math.max(1, nC - 1));
+      R.decos.push({ frame: 'head', a: [0, R.head.r * 0.8, z], b: [0, R.head.r * 0.8 + rr(0.06, 0.13), z - 0.02], r1: cr, r2: cr * 0.6, color: 'accent', k: 0.05 });
+    }
+  }
+  if ((arch === 'quadruped' || arch === 'multiped') && rng() < 0.14) { // back spikes
+    const nS = 3 + (rng() * 3 | 0), sc = pick(['dark', 'accent']);
+    for (let i = 0; i < nS; i++) {
+      const t = i / (nS - 1);
+      const z = lerp(R.body.len * 0.38, -R.body.len * 0.42, t);
+      const yTop = R.body.y + R.body.r1 * 0.8;
+      R.decos.push({ frame: 'body', a: [0, yTop, z], b: [0, yTop + rr(0.08, 0.15) * (1 - t * 0.4), z - 0.03], r1: 0.055, r2: 0.02, color: sc, k: 0.05 });
+    }
+  }
+  if (rng() < 0.14) { // blush cheeks (color-only decals)
+    const cheekC = [0.98, 0.55, 0.55], cr = rr(0.05, 0.08);
+    if (R.head) R.decos.push(
+      { frame: 'head', a: [-R.head.r * 0.74, -R.head.r * 0.15, R.head.len * 0.28], b: [-R.head.r * 0.76, -R.head.r * 0.15, R.head.len * 0.28], r1: cr, r2: cr * 0.97, color: cheekC, k: 0.06, colorOnly: 1, noOutline: 1 },
+      { frame: 'head', a: [R.head.r * 0.74, -R.head.r * 0.15, R.head.len * 0.28], b: [R.head.r * 0.76, -R.head.r * 0.15, R.head.len * 0.28], r1: cr, r2: cr * 0.97, color: cheekC, k: 0.06, colorOnly: 1, noOutline: 1 });
+    else if (R.eyes) R.decos.push(
+      { frame: 'body', a: [-(R.eyes.spread + 0.11), R.eyes.y - 0.13, R.eyes.z * 0.9], b: [-(R.eyes.spread + 0.12), R.eyes.y - 0.13, R.eyes.z * 0.9], r1: cr, r2: cr * 0.97, color: cheekC, k: 0.06, colorOnly: 1, noOutline: 1 },
+      { frame: 'body', a: [R.eyes.spread + 0.11, R.eyes.y - 0.13, R.eyes.z * 0.9], b: [R.eyes.spread + 0.12, R.eyes.y - 0.13, R.eyes.z * 0.9], r1: cr, r2: cr * 0.97, color: cheekC, k: 0.06, colorOnly: 1, noOutline: 1 });
+  }
+  if (!R.decos.length) delete R.decos;
   return R;
 }
 
