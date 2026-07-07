@@ -53,12 +53,58 @@
   .splash-blob { width:46px; height:46px; border-radius:50%; background:rgba(255,255,255,0.85);
     animation:blob 1s ease-in-out infinite alternate; }
   @keyframes blob { from { transform:scale(0.8,1.1); } to { transform:scale(1.1,0.85); } }
+  #ui { position:fixed; left:50%; bottom:52px; transform:translateX(-50%);
+    display:flex; gap:6px; align-items:center; z-index:5; }
+  #ui button { border:0; cursor:pointer; width:42px; height:42px; border-radius:50%;
+    background:rgba(255,255,255,0.86); box-shadow:0 2px 10px rgba(60,80,50,0.10);
+    font:500 19px/1 system-ui, sans-serif; color:#77826d; touch-action:manipulation; padding:0; }
+  #ui button:active { transform:scale(0.92); }
+  .ui-sep { width:10px; }
+  @media (max-width: 430px) {
+    #ui { gap:4px; bottom:48px; }
+    #ui button { width:38px; height:38px; font-size:17px; }
+    .ui-sep { width:6px; }
+    #hint { font-size:11px; padding:8px 12px; max-width:92vw; white-space:normal; text-align:center; line-height:1.35; }
+  }
+  #credits { position:fixed; inset:0; z-index:20; background:rgba(60,80,70,0.35);
+    display:flex; align-items:center; justify-content:center; }
+  #credits[hidden] { display:none; }
+  #credits-card { background:#fffdf6; color:#5c6653; border-radius:18px; max-width:430px;
+    margin:16px; padding:22px 26px; font:400 14px/1.55 system-ui, sans-serif;
+    box-shadow:0 8px 40px rgba(40,60,50,0.25); max-height:82vh; overflow-y:auto; }
+  #credits-card h2 { margin:0 0 6px; font-size:20px; }
+  #credits-card h3 { margin:14px 0 4px; font-size:14px; }
+  #credits-card a { color:#4d9ec9; }
+  #credits-card p { margin:6px 0; }
+  #credits-close { border:0; cursor:pointer; margin-top:10px; padding:8px 22px; border-radius:999px;
+    background:#cfe6c3; color:#5c6653; font:600 13px/1 system-ui, sans-serif; }
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div id="vig"></div>
-<div id="hint">click the ground to call a critter &middot; drag to orbit &middot; keys 1&ndash;5 spawn &middot; R rerolls everyone</div>
+<div id="hint">click or tap the ground to call a critter &middot; drag to orbit &middot; buttons or keys 1&ndash;5 spawn &middot; R rerolls</div>
+<div id="ui">
+  <button data-act="b" title="spawn biped (1)">&#129503;</button>
+  <button data-act="q" title="spawn quadruped (2)">&#128058;</button>
+  <button data-act="m" title="spawn multiped (3)">&#128375;&#65039;</button>
+  <button data-act="h" title="spawn hopper (4)">&#128007;</button>
+  <button data-act="f" title="spawn flyer (5)">&#128029;</button>
+  <span class="ui-sep"></span>
+  <button data-act="reroll" title="reroll everyone (R)">&#127922;</button>
+  <button data-act="credits" title="about and credits">?</button>
+</div>
+<div id="credits" hidden>
+  <div id="credits-card">
+    <h2>critters</h2>
+    <p>Procedural creature sandbox: primitive shapes fused into seamless toon bodies by an SDF blend-shell vertex shader, animated 100% procedurally. One HTML file, no assets. <a href="https://github.com/TrentSterling/critters" target="_blank" rel="noopener">Source on GitHub</a>.</p>
+    <h3>Credits</h3>
+    <p>Original demo + technique: <b>GOOBERS (seamless blend shell critters)</b> by u/AntiqueFeedback7447: <a href="https://redd.it/1umiurs" target="_blank" rel="noopener">Reddit post</a> (r/aigamedev, July 2026) and <a href="https://x.com/Nevsved/status/2073687955265171924" target="_blank" rel="noopener">X post</a>. They published the technique writeup and their prompt; their code was never released. Everything here was written from scratch against that public description plus screenshots. Disclosed in the thread as u/MTOMalley.</p>
+    <p>Visual prior art: <a href="https://www.youtube.com/@RujiKtheComatose" target="_blank" rel="noopener">RujiK the Comatose</a>, whose pre-AI procedural creatures this style strongly resembles.</p>
+    <p>Built by <a href="https://tront.xyz" target="_blank" rel="noopener">Trent Sterling</a> with Claude. v0.2.0</p>
+    <button id="credits-close">close</button>
+  </div>
+</div>
 <div id="splash"><div class="splash-blob"></div><div>critters</div></div>
 <script>
   window.__splashDone = () => document.getElementById('splash').classList.add('gone');
@@ -1601,6 +1647,23 @@ renderer.domElement.addEventListener('pointerup', e => {
 addEventListener('keydown', e => {
   if (e.key >= '1' && e.key <= '5') spawnArch(ARCHES[+e.key - 1]);
   else if (e.key === 'r' || e.key === 'R') rerollAll();
+});
+
+// ---------- ui row + credits ----------
+const creditsEl = document.getElementById('credits');
+function toggleCredits(force) {
+  creditsEl.hidden = force !== undefined ? !force : !creditsEl.hidden;
+}
+document.getElementById('credits-close').addEventListener('click', () => toggleCredits(false));
+creditsEl.addEventListener('click', e => { if (e.target === creditsEl) toggleCredits(false); });
+addEventListener('keydown', e => { if (e.key === 'Escape') toggleCredits(false); });
+const UI_ACTS = { b: 'biped', q: 'quadruped', m: 'multiped', h: 'hopper', f: 'flyer' };
+document.getElementById('ui').addEventListener('click', e => {
+  const act = e.target.closest('button')?.dataset.act;
+  if (!act) return;
+  if (UI_ACTS[act]) spawnArch(UI_ACTS[act]);
+  else if (act === 'reroll') rerollAll();
+  else if (act === 'credits') toggleCredits();
 });
 
 // ---------- gamepad (xbox) ----------
