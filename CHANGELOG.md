@@ -10,9 +10,12 @@ All notable changes to critters. "Confirmed" means verified live by a human, not
 - Owl archetype (key 7): perch and glide state machine, perches on real tree canopies, wide head swivel, angry-owl easter egg (`CRITTERS.angryOwl()`).
 - SDF blend-shell meadow: trees (swaying canopies), half-buried rocks, mushrooms with decal spots, flower tufts. Seeded scatter, re-rolls with the scene, ~11 props, zero plain meshes: everything is the same prim + shader pipeline as the creatures.
 - `tools/inspect.mjs` multi-angle visual QA harness + `CRITTERS.view(i, theta, dist, h)` camera API.
+- Idle jiggle on all archetypes, wavier tree canopies, soft collision reactions instead of hard wall stops.
 - In progress: owl archetype (perch + glide, tree perches, head swivel), name-to-critter, ambient audio + cloud shadows, ecology behaviors.
 
 ### Fixed
+- Eyes sit on the live union surface (no more buried faces); added saccade micro-movements.
+- Legs tuck during airborne state and re-plant with landing juice; no more mid-air stilt locks.
 - Reroll hitch (CONFIRMED faster by Trent): first frame after reroll cost ~920ms of shader compilation because every critter compiled unique programs (per-critter `PRIM_COUNT` define). Now one shared program (`PRIM_COUNT = 40` + `uCount` uniform): 920ms -> 44ms, 21x.
 - Inward face creases at prim overlaps (quad neck): buried vertices now tuck a hair under the skin instead of deep below it.
 - "Vertex explosion" shrapnel spikes: Newton projection steps are clamped, bad gradients in blend valleys can no longer launch vertices.

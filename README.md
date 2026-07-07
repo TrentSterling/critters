@@ -54,6 +54,10 @@ replug and you're back in. Detection uses connect/disconnect events plus per-fra
 - **right stick** — orbit the follow camera, **triggers** zoom
 - Mouse and keyboard keep working the whole time
 
+### Local co-op
+
+Up to 8 gamepads plus a WASD keyboard seat can play together; Tab switches which critter you control, Esc releases possession.
+
 ## How it works: SDF blend-shell
 
 - Every body part is a **round cone** (capsule with two radii; spheres are the degenerate
