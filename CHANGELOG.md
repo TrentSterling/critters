@@ -5,6 +5,9 @@ All notable changes to critters. "Confirmed" means verified live by a human, not
 ## [Unreleased] — v0.3 in progress (2026-07-06)
 
 ### Added
+- Local co-op: up to 8 gamepads plus a WASD keyboard seat, each player possessing their own critter (colored rings, no stealing, hot-plug). Group-follow camera zooms to keep everyone framed.
+- Per-archetype special moves on A/Space (never a no-op): hopper DASH, serpent coil-lunge, flyer boost, walker bunny-hop, owl launch/land.
+- Owl archetype (key 7): perch and glide state machine, perches on real tree canopies, wide head swivel, angry-owl easter egg (`CRITTERS.angryOwl()`).
 - SDF blend-shell meadow: trees (swaying canopies), half-buried rocks, mushrooms with decal spots, flower tufts. Seeded scatter, re-rolls with the scene, ~11 props, zero plain meshes: everything is the same prim + shader pipeline as the creatures.
 - `tools/inspect.mjs` multi-angle visual QA harness + `CRITTERS.view(i, theta, dist, h)` camera API.
 - In progress: owl archetype (perch + glide, tree perches, head swivel), name-to-critter, ambient audio + cloud shadows, ecology behaviors.
