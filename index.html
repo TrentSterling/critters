@@ -61,7 +61,7 @@
   #ui button:active { transform:scale(0.92); }
   .ui-sep { width:10px; }
   @media (max-width: 430px) {
-    #ui { gap:4px; bottom:48px; }
+    #ui { gap:4px; bottom:64px; }
     #ui button { width:38px; height:38px; font-size:17px; }
     .ui-sep { width:6px; }
     #hint { font-size:11px; padding:8px 12px; max-width:92vw; white-space:normal; text-align:center; line-height:1.35; }
@@ -1668,6 +1668,7 @@ document.getElementById('ui').addEventListener('click', e => {
 
 // ---------- gamepad (xbox) ----------
 const hintEl = document.getElementById('hint');
+if (matchMedia('(pointer: coarse)').matches) hintEl.textContent = 'tap the ground to call a critter';
 const HINT_DEFAULT = hintEl.innerHTML;
 const HINT_PAD = '\u{1F3AE} left stick move · A jump · LB/RB switch critter · right stick camera · triggers zoom';
 const pad = { index: -1, critter: null, prevButtons: [], hintTimer: 0, rx: 0, ry: 0, zoom: 0 };

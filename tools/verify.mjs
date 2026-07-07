@@ -4,8 +4,9 @@ import { spawn } from 'node:child_process';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import http from 'node:http';
 
-const args = process.argv.slice(2).filter(a => a !== '--mobile');
+const args = process.argv.slice(2).filter(a => a !== '--mobile' && !a.startsWith('--tap='));
 const MOBILE = process.argv.includes('--mobile');
+const TAP = (process.argv.find(a => a.startsWith('--tap=')) || '').slice(6).split(',').map(Number);
 const [name = 'shot', suffix = '', expr = ''] = args;
 const PORT = 9333;
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
@@ -54,6 +55,12 @@ if (MOBILE) {
 }
 await send('Page.navigate', { url: URL });
 await sleep(2500);
+if (TAP.length === 2 && Number.isFinite(TAP[0])) {
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: TAP[0], y: TAP[1] }] });
+  await sleep(60);
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await sleep(600);
+}
 let result = null;
 if (expr) {
   const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
