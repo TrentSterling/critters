@@ -94,6 +94,7 @@
   <span class="ui-sep"></span>
   <button data-act="reroll" title="reroll everyone (R)">&#127922;</button>
   <button data-act="share" title="copy a link to the nearest critter">&#128279;</button>
+  <button data-act="sound" title="sound on/off">&#128266;</button>
   <button data-act="credits" title="about and credits">?</button>
 </div>
 <div id="credits" hidden>
@@ -497,8 +498,36 @@ function updateDust(dt) {
   }
 }
 
+// ---------- procedural audio (tiny synth blips, no assets) ----------
+let AC = null;
+let soundOn = localStorage.getItem('critters_sound') !== '0';
+function ensureAC() {
+  if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch { } }
+  if (AC && AC.state === 'suspended') AC.resume();
+}
+addEventListener('pointerdown', ensureAC);
+addEventListener('keydown', ensureAC);
+const SFX = {
+  pet:   { f0: 620, f1: 940, dur: 0.14, type: 'sine',     vol: 0.16 },
+  hop:   { f0: 300, f1: 520, dur: 0.10, type: 'triangle', vol: 0.10 },
+  land:  { f0: 240, f1: 130, dur: 0.09, type: 'sine',     vol: 0.12 },
+  spawn: { f0: 380, f1: 760, dur: 0.18, type: 'sine',     vol: 0.13 },
+};
+function sfx(kind) {
+  if (!soundOn || !AC || AC.state !== 'running') return;
+  const P = SFX[kind]; if (!P) return;
+  const t = AC.currentTime;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.connect(g); g.connect(AC.destination);
+  o.type = P.type;
+  o.frequency.setValueAtTime(P.f0 * (0.92 + Math.random() * 0.16), t);
+  o.frequency.exponentialRampToValueAtTime(P.f1, t + P.dur);
+  g.gain.setValueAtTime(P.vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + P.dur);
+  o.start(t); o.stop(t + P.dur + 0.02);
+}
+
 // ---------- heart particles (petting) ----------
-function sfx() {} // replaced by the procedural audio section below at load; kept callable everywhere
 const heartTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const g = c.getContext('2d');
@@ -1117,6 +1146,7 @@ class Critter {
       this.squashVel -= 3.5;
       const gyj = groundY(this.pos.x, this.pos.z);
       spawnDust(this.pos.x, gyj + 0.04, this.pos.z, 5, 0.2 * this.size, 0.16 * this.size, 0.5);
+      sfx('hop');
     }
     this.wantJump = false;
     if (this.airY > 0) {
@@ -1127,6 +1157,7 @@ class Critter {
         this.squashVel -= 4; this.dipVel -= 0.4;
         const gyl = groundY(this.pos.x, this.pos.z);
         spawnDust(this.pos.x, gyl + 0.04, this.pos.z, 6, 0.22 * this.size, 0.18 * this.size, 0.6);
+        sfx('land');
       }
     }
 
@@ -1233,6 +1264,7 @@ class Critter {
       this.jumpVy = 3.0 * Math.sqrt(this.size);
       this.airY = 0.001;
       this.squashVel -= 3;
+      sfx('hop');
     }
     this.wantJump = false;
     if (this.airY > 0) {
@@ -1241,6 +1273,7 @@ class Critter {
       if (this.airY <= 0) {
         this.airY = 0; this.jumpVy = 0; this.squashVel -= 3;
         spawnDust(this.pos.x, groundY(this.pos.x, this.pos.z) + 0.04, this.pos.z, 6, 0.22 * this.size, 0.18 * this.size, 0.6);
+        sfx('land');
       }
     }
 
@@ -1338,6 +1371,7 @@ class Critter {
         this.bigHop = false;
         this.hVel.set(dx / d * L / T, g * T * 0.5, dz / d * L / T);
         spawnDust(this.pos.x, groundY(this.pos.x, this.pos.z) + 0.03, this.pos.z, 4, 0.16 * this.size, 0.16 * this.size, 0.5);
+        sfx('hop');
       }
     } else if (this.hState === 'air') {
       squashTarget = 1.24;
@@ -1351,6 +1385,7 @@ class Critter {
         this.hState = 'land'; this.hT = 0;
         this.squashVel -= 5.5;
         spawnDust(this.pos.x, groundY(this.pos.x, this.pos.z) + 0.03, this.pos.z, 7, 0.22 * this.size, 0.18 * this.size, 0.6);
+        sfx('land');
       }
     } else if (this.hState === 'land') {
       squashTarget = 1;
@@ -1856,6 +1891,7 @@ function spawnCritter(recipe, x, z, heading) {
   const c = new Critter(recipe, x, z, heading);
   c.squash = 0.55; c.squashVel = 3.5; // pop in
   spawnDust(x, groundY(x, z) + 0.05, z, 8, 0.25 * recipe.size, 0.2 * recipe.size, 0.9);
+  sfx('spawn');
   critters.push(c);
   return c;
 }
@@ -1947,8 +1983,15 @@ document.getElementById('ui').addEventListener('click', e => {
   if (UI_ACTS[act]) spawnArch(UI_ACTS[act]);
   else if (act === 'reroll') rerollAll();
   else if (act === 'share') shareCritter();
+  else if (act === 'sound') {
+    soundOn = !soundOn;
+    localStorage.setItem('critters_sound', soundOn ? '1' : '0');
+    e.target.closest('button').innerHTML = soundOn ? '&#128266;' : '&#128263;';
+    if (soundOn) { ensureAC(); sfx('pet'); }
+  }
   else if (act === 'credits') toggleCredits();
 });
+if (!soundOn) document.querySelector('[data-act=sound]').innerHTML = '&#128263;';
 
 // ---------- share links (recipe in the URL hash) ----------
 function encodeRecipe(r) {
