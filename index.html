@@ -83,7 +83,7 @@
 <body>
 <div id="app"></div>
 <div id="vig"></div>
-<div id="hint">click or tap the ground to call a critter &middot; drag to orbit &middot; buttons or keys 1&ndash;6 spawn &middot; R rerolls</div>
+<div id="hint">click or tap the ground to call a critter &middot; drag to orbit &middot; buttons or keys 1&ndash;7 spawn &middot; R rerolls</div>
 <div id="ui">
   <button data-act="b" title="spawn biped (1)">&#129503;</button>
   <button data-act="q" title="spawn quadruped (2)">&#128058;</button>
@@ -91,6 +91,7 @@
   <button data-act="h" title="spawn hopper (4)">&#128007;</button>
   <button data-act="f" title="spawn flyer (5)">&#128029;</button>
   <button data-act="s" title="spawn serpent (6)">&#128013;</button>
+  <button data-act="o" title="spawn owl (7)">&#129417;</button>
   <span class="ui-sep"></span>
   <button data-act="reroll" title="reroll everyone (R)">&#127922;</button>
   <button data-act="share" title="copy a link to the nearest critter">&#128279;</button>
@@ -732,6 +733,10 @@ class Critter {
     this.hState = 'idle'; this.hT = rr(0, 1); this.hVel = new THREE.Vector3();
     // flyer
     this.propAngle = rng() * TAU;
+    // owl: perch/glide state
+    this.oState = 'perch'; this.oTimer = rr(6, 14); this.oGazeTimer = rr(1, 3);
+    this.oPerch = null; this.oDest = null; this.oLaunchY = 0; this.oCruiseY = 0; this.oDestDist = 1;
+    this.wingSpread = 0;
     // gamepad control
     this.controlled = false;
     this.input = new THREE.Vector3();
@@ -866,6 +871,20 @@ class Critter {
           shoulder: new THREE.Vector3(side * A.x * S, A.y * S, A.z * S),
           len: A.len * S, r1: A.thick * S, r2: A.thick * 0.7 * S, handR: A.handR * S,
           iArm, iHand,
+        });
+      }
+    }
+
+    // --- wings (owl: folded stub prims that spread wide mid-glide) ---
+    this.wings = [];
+    if (R.wings) {
+      const W = R.wings;
+      for (const side of [-1, 1]) {
+        const iWing = addPrim(P.limb, 0.06 * S, 0.14);
+        this.wings.push({
+          side, iWing,
+          shoulder: new THREE.Vector3(side * W.x * S, W.y * S, W.z * S),
+          len: W.len * S, r1: W.thick * S, r2: W.thick * 0.35 * S,
         });
       }
     }
@@ -1061,6 +1080,7 @@ class Critter {
   }
 
   callTo(x, z) {
+    if (this.arch === 'owl') { this.launchGlide({ x, y: groundY(x, z), z, onTree: false }, true); return; }
     this.target = { x, z };
     this.squashVel -= 1.8; // excited blip
     this.wanderTimer = rr(3, 7);
@@ -1092,6 +1112,7 @@ class Critter {
     if (this.arch === 'hopper') this.updateHopper(dt);
     else if (this.arch === 'flyer') this.updateFlyer(dt);
     else if (this.arch === 'serpent') this.updateSerpent(dt);
+    else if (this.arch === 'owl') this.updateOwl(dt);
     else this.updateWalker(dt);
     this.updateFrame(dt, false);
     this.updateEyes(dt);
@@ -1105,7 +1126,7 @@ class Critter {
     this.geo.boundingSphere.center.set(this.pos.x, gy + this.airY + this.bodyY, this.pos.z);
   }
 
-  seekTarget(dt, maxSpeed, accel) {
+  seekTarget(dt, maxSpeed, accel, maxR = 9) {
     let desiredX = 0, desiredZ = 0;
     if (this.controlled) {
       desiredX = this.input.x * maxSpeed;
@@ -1124,9 +1145,9 @@ class Critter {
     this.vel.z += (desiredZ - this.vel.z) * k;
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
-    // keep near origin
+    // keep near origin (owls glide further out, to the meadow's tree ring)
     const dd = Math.sqrt(this.pos.x * this.pos.x + this.pos.z * this.pos.z);
-    if (dd > 9) { this.pos.x *= 9 / dd; this.pos.z *= 9 / dd; }
+    if (dd > maxR) { this.pos.x *= maxR / dd; this.pos.z *= maxR / dd; }
     const speed = Math.sqrt(this.vel.x * this.vel.x + this.vel.z * this.vel.z);
     this.speedN = clamp(speed / maxSpeed, 0, 1);
     if (speed > 0.12) {
@@ -1456,6 +1477,127 @@ class Critter {
     this.speedN = clamp(speed / (R.motion.speed * this.size), 0, 1);
   }
 
+  // perch-and-glide state machine: sits still (ground or tree canopy) with a wide,
+  // occasionally-snapping head swivel, then launches a flyer-style glide to a new spot
+  updateOwl(dt) {
+    const R = this.recipe;
+    if (this.controlled) {
+      if (this.oState === 'perch') {
+        const m = Math.hypot(this.input.x, this.input.z);
+        if (this.wantJump || m > 0.3) {
+          let dx = this.input.x, dz = this.input.z;
+          if (m < 0.3) { dx = Math.sin(this.heading); dz = Math.cos(this.heading); }
+          const im = 1 / (Math.hypot(dx, dz) || 1);
+          const L = rr(3, 5.5) * this.size;
+          const x = clamp(this.pos.x + dx * im * L, -8, 8), z = clamp(this.pos.z + dz * im * L, -8, 8);
+          this.launchGlide({ x, y: groundY(x, z), z, onTree: false }, true);
+        }
+      } else if (this.oState === 'glide') {
+        const m = Math.hypot(this.input.x, this.input.z);
+        if (m > 0.15) {
+          const steer = 2.6 * this.size;
+          const x = clamp(this.pos.x + this.input.x * steer, -8, 8);
+          const z = clamp(this.pos.z + this.input.z * steer, -8, 8);
+          this.oDest.x = x; this.oDest.z = z; this.oDest.y = groundY(x, z); this.oDest.onTree = false;
+          this.target = { x, z };
+        }
+        if (this.wantJump) {
+          this.oDest = { x: this.pos.x, y: groundY(this.pos.x, this.pos.z), z: this.pos.z, onTree: false };
+          this.target = { x: this.oDest.x, z: this.oDest.z };
+        }
+      }
+      this.wantJump = false;
+    } else if (this.oState === 'perch') {
+      this.oTimer -= dt;
+      if (this.oTimer <= 0) {
+        this.oTimer = rr(6, 14);
+        if (rng() < 0.6) this.launchGlide();
+      }
+      // slow curious look-around: snap lookDir to a new angle, then hold
+      this.oGazeTimer -= dt;
+      if (this.oGazeTimer <= 0) {
+        this.oGazeTimer = rr(2, 5);
+        const a = rng() * TAU;
+        this.lookDir.set(Math.sin(a), rr(-0.15, 0.2), Math.cos(a)).normalize();
+      }
+    }
+
+    if (this.oState === 'perch') {
+      this.lift = 0;
+      this.pitch = Math.sin(this.time * 1.3) * 0.02;
+      this.roll = Math.sin(this.time * 0.9) * 0.025;
+      E1.set(this.pitch, this.heading, this.roll, 'YXZ');
+      this.quat.setFromEuler(E1);
+      E1.set(0, this.heading, 0, 'YXZ');
+      this.yawQuat.setFromEuler(E1);
+      if (this.oPerch) this.airY = this.oPerch.y - groundY(this.pos.x, this.pos.z);
+      this.speedN *= Math.max(0, 1 - 4 * dt);
+      this.squashVel += (1 + Math.sin(this.time * 1.8) * 0.02 - this.squash) * 45 * dt;
+    } else { // glide — trees can sit out at the edge of the meadow ring (r up to 14),
+      // well past the radius-9 leash every other archetype's seekTarget keeps to
+      const speed = this.seekTarget(dt, R.motion.speed * this.size, 3.2, 16);
+      this.speedN = clamp(speed / (R.motion.speed * this.size), 0, 1);
+      const dx = this.oDest.x - this.pos.x, dz = this.oDest.z - this.pos.z;
+      const d = Math.hypot(dx, dz);
+      const t = clamp(1 - d / Math.max(this.oDestDist, 0.001), 0, 1);
+      let worldY = lerp(this.oLaunchY, this.oCruiseY, clamp(t / 0.3, 0, 1));
+      worldY = lerp(worldY, this.oDest.y, clamp((t - 0.65) / 0.35, 0, 1));
+      worldY += Math.sin(this.time * 3.2) * 0.05 * this.size;
+      this.airY = worldY - groundY(this.pos.x, this.pos.z);
+      this.lift = 0;
+      this.pitch = clamp(this.speedN * 0.16, -0.3, 0.35);
+      this.roll = clamp(-this.headingVel * 0.09, -0.5, 0.5);
+      E1.set(this.pitch, this.heading, this.roll, 'YXZ');
+      this.quat.setFromEuler(E1);
+      this.yawQuat.copy(this.quat);
+      this.squashVel += (1.05 - this.squash) * 70 * dt;
+      if (!this.target) this.land(); // seekTarget nulls the target on arrival
+    }
+    this.squashVel *= Math.max(0, 1 - 10 * dt);
+    this.squash = clamp(this.squash + this.squashVel * dt, 0.6, 1.4);
+
+    const wantSpread = this.oState === 'glide' ? 1 : 0;
+    this.wingSpread = lerp(this.wingSpread, wantSpread, Math.min(1, 5 * dt));
+  }
+
+  launchGlide(dest, force = false) {
+    if (this.oState === 'glide' && !force) return;
+    this.oLaunchY = groundY(this.pos.x, this.pos.z) + this.airY;
+    this.oDest = dest || this.pickPerch();
+    const dx = this.oDest.x - this.pos.x, dz = this.oDest.z - this.pos.z;
+    this.oDestDist = Math.max(0.6, Math.hypot(dx, dz));
+    this.oCruiseY = Math.max(this.oLaunchY, this.oDest.y) + 0.7 * this.size;
+    this.target = { x: this.oDest.x, z: this.oDest.z };
+    this.oState = 'glide';
+    this.oPerch = null;
+    this.squashVel -= 2.4;
+    sfx('hop');
+  }
+
+  pickPerch() {
+    const spots = [];
+    for (const p of props) if (p.kind === 'tree' && p.perches) for (const pt of p.perches) spots.push(pt);
+    if (spots.length && rng() < 0.65) {
+      const pt = pick(spots);
+      return { x: pt.x, y: pt.y, z: pt.z, onTree: true };
+    }
+    const a = rng() * TAU, r = rr(2, 5);
+    const x = clamp(this.pos.x + Math.sin(a) * r, -8, 8), z = clamp(this.pos.z + Math.cos(a) * r, -8, 8);
+    return { x, y: groundY(x, z), z, onTree: false };
+  }
+
+  land() {
+    this.oState = 'perch';
+    this.pos.x = this.oDest.x; this.pos.z = this.oDest.z;
+    this.oPerch = this.oDest.onTree ? this.oDest : null;
+    this.airY = this.oPerch ? (this.oPerch.y - groundY(this.pos.x, this.pos.z)) : 0;
+    this.squashVel -= 4.5;
+    const gy = groundY(this.pos.x, this.pos.z);
+    spawnDust(this.pos.x, gy + this.airY + 0.03, this.pos.z, this.oPerch ? 3 : 6, 0.16 * this.size, 0.15 * this.size, this.oPerch ? 0.3 : 0.55);
+    sfx('land');
+    this.oTimer = rr(6, 14);
+  }
+
   // write all prims for the current pose
   updateFrame(dt, bind) {
     const S = this.size;
@@ -1563,6 +1705,21 @@ class Critter {
       this.setPrim(arm.iHand, V[5], V[7], arm.handR, arm.handR * 0.95);
     }
 
+    // wings (owl: hug the body folded, flare outward with a flap during glide)
+    if (this.wings.length) {
+      const t = this.wingSpread;
+      for (const w of this.wings) {
+        this.toWorld(V[4], w.shoulder, this.lift);
+        const flap = t > 0.05 ? Math.sin(this.time * 9) * 0.16 * t : 0;
+        const dx = lerp(w.side * 0.32, w.side * 1.0, t);
+        const dy = lerp(-0.88, 0.08, t) + flap;
+        const dz = lerp(-0.25, -0.12, t);
+        V[6].set(dx, dy, dz).normalize().applyQuaternion(this.yawQuat);
+        V[5].copy(V[4]).addScaledVector(V[6], w.len);
+        this.setPrim(w.iWing, V[4], V[5], w.r1, w.r2);
+      }
+    }
+
     // ropes
     for (const rp of this.ropes) {
       this.toWorld(V[4], rp.attachLocal, this.lift);
@@ -1636,9 +1793,10 @@ class Critter {
         this.lookDir.lerp(V[0], Math.min(1, 4 * dt)).normalize();
       }
     }
-    // head look springs
-    const wantYaw = clamp(angleDiff(Math.atan2(this.lookDir.x, this.lookDir.z), this.heading), -0.55, 0.55);
-    this.headYaw = lerp(this.headYaw, wantYaw, Math.min(1, 6 * dt));
+    // head look springs — owls get a much wider swivel with a snappier catch-up
+    const yawMax = this.arch === 'owl' ? 1.4 : 0.55;
+    const wantYaw = clamp(angleDiff(Math.atan2(this.lookDir.x, this.lookDir.z), this.heading), -yawMax, yawMax);
+    this.headYaw = lerp(this.headYaw, wantYaw, Math.min(1, (this.arch === 'owl' ? 9 : 6) * dt));
     this.headPitch = lerp(this.headPitch, clamp(-this.lookDir.y * 0.8, -0.3, 0.25), Math.min(1, 5 * dt));
 
     // blink
@@ -1692,6 +1850,7 @@ class Prop {
     this.kind = kind;
     this.pos = new THREE.Vector3(x, 0, z);
     this.sway = null; // trees only: { list: [{i, bx, bz, phase}] }
+    this.perches = []; // trees only: world-space owl perch points on canopy tops
     this.outlineTint = '#2c332a';
     this.build();
   }
@@ -1800,6 +1959,7 @@ class Prop {
       const leaf = hsl(leafHue + rr(-10, 10), rr(0.38, 0.52), rr(0.42, 0.54));
       const idx = addPrim(leaf, 0.22, 0.10, cx, cy, cz, cx, cy + 0.02, cz, rC, rC * 0.96);
       this.sway.list.push({ i: idx, bx: cx, bz: cz, phase: rng() * TAU });
+      this.perches.push({ x: cx, y: cy + rC * 0.82, z: cz });
     }
     this.outlineTint = '#26331b';
   }
@@ -2015,6 +2175,31 @@ const FEATURED = [
   },
 ];
 
+// easter egg: hand-tuned "angry owl" recipe (nod to the Reddit thread) — not part of the
+// featured cast, spawnable on demand via CRITTERS.angryOwl()
+const ANGRY_OWL = {
+  archetype: 'owl', size: 1.05,
+  palette: {
+    base: hex('#3a3630'), belly: hex('#544d40'), limb: hex('#2c2822'),
+    dark: hex('#17140f'), accent: hex('#c0392b'), spot: hex('#544d40'), outline: '#0d0b08',
+  },
+  body: { upright: true, len: 0.42, r1: 0.33, r2: 0.24, y: 0.32, topZ: -0.02 },
+  belly: [0, 0.38, 0.18, 0.22],
+  decos: [
+    { frame: 'body', a: [-0.125, 0.08, 0.132], b: [-0.125, 0.03, 0.149], r1: 0.06, r2: 0.05, color: 'dark', k: 0.09, gloss: 0.6 },
+    { frame: 'body', a: [ 0.125, 0.08, 0.132], b: [ 0.125, 0.03, 0.149], r1: 0.06, r2: 0.05, color: 'dark', k: 0.09, gloss: 0.6 },
+    { frame: 'body', a: [0, 0.564, 0.281], b: [0, 0.529, 0.366], r1: 0.045, r2: 0.014, color: [0.90, 0.35, 0.1], k: 0.05 },
+    { frame: 'body', a: [-0.182, 0.71, -0.02], b: [-0.224, 0.83, -0.06], r1: 0.032, r2: 0.01, color: 'dark', k: 0.045 },
+    { frame: 'body', a: [ 0.182, 0.71, -0.02], b: [ 0.224, 0.83, -0.06], r1: 0.032, r2: 0.01, color: 'dark', k: 0.045 },
+    // angled dark brows, slanted down toward the beak, cross over the big eyes
+    { frame: 'body', a: [-0.28, 0.63, 0.29], b: [-0.10, 0.53, 0.30], r1: 0.03, r2: 0.03, color: 'dark', k: 0.05, gloss: 0.1 },
+    { frame: 'body', a: [ 0.28, 0.63, 0.29], b: [ 0.10, 0.53, 0.30], r1: 0.03, r2: 0.03, color: 'dark', k: 0.05, gloss: 0.1 },
+  ],
+  wings: { x: 0.304, y: 0.467, z: 0, len: 0.31, thick: 0.11 },
+  eyes: { count: 2, r: 0.13, spread: 0.165, y: 0.58, z: 0.264 },
+  motion: { speed: 2.6, tempo: 1, bob: 0 },
+};
+
 // ---------- recipe generator ----------
 function genRecipe(arch) {
   const hue = rng() * 360;
@@ -2089,6 +2274,29 @@ function genRecipe(arch) {
     R.eyes = { count: rng() < 0.12 ? 1 : 2, r: rr(0.055, 0.08), spread: R.head.r * 0.55, y: R.head.r * 0.25, z: R.head.len * 0.4 };
     R.motion = { speed: rr(1.2, 1.8), tempo: rr(0.9, 1.3), bob: 0 };
   }
+  else if (arch === 'owl') {
+    const r1 = rr(0.28, 0.36);
+    const bodyLen = rr(0.36, 0.46);
+    const bodyY = r1 * rr(0.85, 1.05);
+    R.body = { upright: true, len: bodyLen, r1, r2: r1 * rr(0.6, 0.8), y: bodyY, topZ: rr(-0.04, 0.02) };
+    R.belly = [0, bodyY + 0.06, r1 * 0.55, r1 * rr(0.55, 0.7)];
+    R.decos = [ // feet: tiny dark toe nubs, like the hopper's
+      { frame: 'body', a: [-r1 * 0.38, 0.08, r1 * 0.4], b: [-r1 * 0.38, 0.03, r1 * 0.45], r1: 0.06, r2: 0.05, color: 'dark', k: 0.09, gloss: 0.6 },
+      { frame: 'body', a: [ r1 * 0.38, 0.08, r1 * 0.4], b: [ r1 * 0.38, 0.03, r1 * 0.45], r1: 0.06, r2: 0.05, color: 'dark', k: 0.09, gloss: 0.6 },
+    ];
+    const beakY = bodyY + bodyLen * 0.58, beakZ = r1 * 0.85;
+    R.decos.push({ frame: 'body', a: [0, beakY, beakZ], b: [0, beakY - 0.035, beakZ + 0.085], r1: 0.045, r2: 0.014, color: [0.90, 0.55, 0.15], k: 0.05 });
+    if (rng() < 0.6) { // ear tufts
+      const tuftY = bodyY + bodyLen - 0.03;
+      R.decos.push(
+        { frame: 'body', a: [-r1 * 0.55, tuftY, -0.02], b: [-r1 * 0.68, tuftY + rr(0.09, 0.15), -0.06], r1: 0.032, r2: 0.01, color: 'dark', k: 0.045 },
+        { frame: 'body', a: [ r1 * 0.55, tuftY, -0.02], b: [ r1 * 0.68, tuftY + rr(0.09, 0.15), -0.06], r1: 0.032, r2: 0.01, color: 'dark', k: 0.045 });
+    }
+    R.wings = { x: r1 * 0.92, y: bodyY + bodyLen * 0.35, z: 0, len: rr(0.26, 0.36), thick: rr(0.09, 0.13) };
+    R.eyes = { count: rng() < 0.05 ? 1 : 2, r: rr(0.11, 0.16), spread: r1 * 0.5, y: bodyY + bodyLen * 0.62, z: r1 * 0.8 };
+    if (R.eyes.count === 1) R.eyes.spread = 0;
+    R.motion = { speed: rr(2.2, 3.0), tempo: 1, bob: 0 };
+  }
   else { // flyer
     const r1 = rr(0.3, 0.4);
     R.body = { upright: true, len: rr(0.4, 0.52), r1, r2: r1 * rr(0.6, 0.8), y: 0.3, topZ: rr(-0.05, 0) };
@@ -2141,7 +2349,7 @@ function genRecipe(arch) {
 }
 
 // ---------- spawn / reroll ----------
-const ARCHES = ['biped', 'quadruped', 'multiped', 'hopper', 'flyer', 'serpent'];
+const ARCHES = ['biped', 'quadruped', 'multiped', 'hopper', 'flyer', 'serpent', 'owl'];
 
 function spawnCritter(recipe, x, z, heading) {
   if (critters.length >= 14) {
@@ -2228,7 +2436,7 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (best) best.callTo(p.x, p.z);
 });
 addEventListener('keydown', e => {
-  if (e.key >= '1' && e.key <= '6') spawnArch(ARCHES[+e.key - 1]);
+  if (e.key >= '1' && e.key <= '7') spawnArch(ARCHES[+e.key - 1]);
   else if (e.key === 'r' || e.key === 'R') rerollAll();
 });
 
@@ -2240,7 +2448,7 @@ function toggleCredits(force) {
 document.getElementById('credits-close').addEventListener('click', () => toggleCredits(false));
 creditsEl.addEventListener('click', e => { if (e.target === creditsEl) toggleCredits(false); });
 addEventListener('keydown', e => { if (e.key === 'Escape') toggleCredits(false); });
-const UI_ACTS = { b: 'biped', q: 'quadruped', m: 'multiped', h: 'hopper', f: 'flyer', s: 'serpent' };
+const UI_ACTS = { b: 'biped', q: 'quadruped', m: 'multiped', h: 'hopper', f: 'flyer', s: 'serpent', o: 'owl' };
 document.getElementById('ui').addEventListener('click', e => {
   const act = e.target.closest('button')?.dataset.act;
   if (!act) return;
@@ -2413,11 +2621,18 @@ function updatePadCamera(dt) {
 }
 
 // ---------- separation ----------
+// flyers never jostle ground critters (and vice versa); owls join that "airborne" group
+// while gliding or perched up in a tree canopy, since there's nothing to collide with
+function airborne(c) {
+  if (c.arch === 'flyer') return true;
+  if (c.arch === 'owl') return c.oState === 'glide' || !!c.oPerch;
+  return false;
+}
 function separate(dt) {
   for (let i = 0; i < critters.length; i++) {
     for (let j = i + 1; j < critters.length; j++) {
       const a = critters[i], b = critters[j];
-      if ((a.arch === 'flyer') !== (b.arch === 'flyer')) continue;
+      if (airborne(a) !== airborne(b)) continue;
       const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
       const d = Math.sqrt(dx * dx + dz * dz);
       const min = (a.bodyR + b.bodyR) * 1.9;
@@ -2439,6 +2654,7 @@ window.CRITTERS = {
   props,
   spawn: arch => spawnArch(arch),
   spawnRecipe: (r, x = 0, z = 0) => spawnCritter(r, x, z, rng() * TAU),
+  angryOwl: (x = 0, z = 1.5) => spawnCritter(ANGRY_OWL, x, z, Math.PI),
   reroll: seed => rerollAll(seed),
   frame: (i, dist = 3.4) => {
     const c = critters[i]; if (!c) return;
