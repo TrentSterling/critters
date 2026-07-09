@@ -1582,6 +1582,12 @@ class Critter {
 
   pet() {
     this.squashVel -= 2.2; // happy bounce
+    // a little wave of joy: nearby critters bounce and look over
+    for (const o of critters) {
+      if (o === this || o.controlled || o.napping) continue;
+      const dd = (o.pos.x - this.pos.x) ** 2 + (o.pos.z - this.pos.z) ** 2;
+      if (dd < 9) { o.squashVel -= 0.6; o.gazeAt = this; o.gazeT = rr(1, 2); }
+    }
     this.gazeAt = null;
     this.lookDir.subVectors(camera.position, this.pos).normalize(); // glance up at you
     const gy = groundY(this.pos.x, this.pos.z);
@@ -1713,6 +1719,13 @@ class Critter {
           const a = rng() * TAU;
           this.lookDir.set(Math.sin(a), rr(-0.1, 0.25), Math.cos(a)).normalize();
           this.lookTimer = rr(1.5, 3.5);
+        }
+        // a passing butterfly sometimes steals the glance
+        for (const bf of butterflies) {
+          if ((bf.pos.x - this.pos.x) ** 2 + (bf.pos.z - this.pos.z) ** 2 < 5 && rng() < 0.4) {
+            this.lookDir.set(bf.pos.x - this.pos.x, 0.5, bf.pos.z - this.pos.z).normalize();
+            this.gazeAt = null; this.lookTimer = rr(1, 2.2); break;
+          }
         }
       }
     }
