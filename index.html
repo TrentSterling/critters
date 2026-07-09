@@ -650,6 +650,11 @@ const questTex = glyphTex(g => {
   g.font = 'bold 48px system-ui,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.strokeText('?', 32, 34); g.fillText('?', 32, 34);
 });
+const zzzTex = glyphTex(g => {
+  g.fillStyle = '#cfe6ff'; g.strokeStyle = '#3a5a78'; g.lineWidth = 4;
+  g.font = 'bold 40px system-ui,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.strokeText('z', 32, 34); g.fillText('z', 32, 34);
+});
 const starTex = glyphTex(g => {
   g.translate(32, 32); g.fillStyle = '#fff4c2';
   g.beginPath();
@@ -834,6 +839,125 @@ function projectEyeOntoSurface(c, pos, r) {
 const critters = [];
 let critterSerial = 0;
 
+// ---------- autonomous ecology: a tiny vignette director (a sim you can leave running) ----------
+// scans a data table of group behaviors, runs 1-2 at a time, and only ever writes onto fields
+// critters already consume (target / gazeAt / squashVel / lookDir). Owls run their own perch/glide
+// life and are left out of every cast; the wander() guard keeps a vignette's target from being
+// clobbered by the idle retarget timer.
+const director = { active: [], cool: new Map(), clock: 0 };
+function idleCritters(pred) {
+  const out = [];
+  for (const c of critters) {
+    if (c.controlled || c.vignette || c.arch === 'owl') continue;
+    if (c.speedN > 0.35) continue;
+    if (pred && !pred(c)) continue;
+    out.push(c);
+  }
+  return out;
+}
+const VIGNETTES = [
+  // a lone critter dozes off (eyes shut, breathing, zzz), then wakes with a jiggle
+  { name: 'nap', min: 1, cd: 8, weight: 0.9,
+    find() { const p = idleCritters(c => !c.chain); return p.length ? [p[(rng() * p.length) | 0]] : null; },
+    start(v) { const c = v.cast[0]; c.target = null; v.dur = rr(5, 9); c.napping = true; c.zzzT = rr(0.6, 1.4); },
+    tick(v, dt) {
+      v.t = (v.t || 0) + dt; const c = v.cast[0];
+      c.zzzT -= dt;
+      if (c.zzzT <= 0) { c.zzzT = rr(1.3, 2.3); spawnPop(c.pos.x + 0.12 * c.size, aboveHead(c), c.pos.z, zzzTex, 0.2 * c.size, 1.7, 0.4); }
+      return v.t >= v.dur;
+    },
+    end(v) { const c = v.cast[0]; c.napping = false; c.squashVel -= 2.5; c.blinkT = 0;
+      spawnDust(c.pos.x, groundY(c.pos.x, c.pos.z) + 0.04, c.pos.z, 3, 0.12 * c.size, 0.12 * c.size, 0.3); } },
+
+  // 2-3 critters gather around a mushroom, ring up, and peck-bob while looking at it
+  { name: 'gather', min: 2, cd: 10, weight: 1.0,
+    find() {
+      for (const m of props) {
+        if (m.kind !== 'mushroom') continue;
+        const near = idleCritters(c => !c.chain && c.pos.distanceTo(m.pos) < 6);
+        if (near.length >= 2) return near.slice(0, 3);
+      }
+      return null;
+    },
+    start(v) {
+      let cx = 0, cz = 0; for (const c of v.cast) { cx += c.pos.x; cz += c.pos.z; } cx /= v.cast.length; cz /= v.cast.length;
+      let best = null, bd = 1e9;
+      for (const m of props) { if (m.kind !== 'mushroom') continue; const d = (m.pos.x - cx) ** 2 + (m.pos.z - cz) ** 2; if (d < bd) { bd = d; best = m; } }
+      v.mush = best; v.dur = rr(6, 10);
+      v.cast.forEach((c, i) => {
+        const a = i / v.cast.length * TAU + rr(-0.3, 0.3), r = 0.7 + 0.16 * i;
+        c.target = { x: v.mush.pos.x + Math.sin(a) * r, z: v.mush.pos.z + Math.cos(a) * r }; c.peckT = rr(0.6, 1.4);
+      });
+    },
+    tick(v, dt) {
+      v.t = (v.t || 0) + dt;
+      for (const c of v.cast) {
+        if (!c.target && c.speedN < 0.12) {
+          c.peckT -= dt; if (c.peckT <= 0) { c.peckT = rr(0.8, 1.6); c.squashVel -= 0.35; }
+          c.lookDir.set(v.mush.pos.x - c.pos.x, -0.15, v.mush.pos.z - c.pos.z).normalize(); c.gazeAt = null;
+        }
+      }
+      return v.t >= v.dur;
+    } },
+
+  // two walker-class critters play tag; roles swap on contact with a happy bounce
+  { name: 'tag', min: 2, cd: 12, weight: 1.1,
+    find() {
+      const w = idleCritters(c => c.legs && c.legs.length && !c.chain);
+      for (let i = 0; i < w.length; i++) for (let j = i + 1; j < w.length; j++)
+        if (w[i].pos.distanceTo(w[j].pos) < 5.5) return [w[i], w[j]];
+      return null;
+    },
+    start(v) { v.it = v.cast[(rng() * 2) | 0]; v.dur = rr(8, 13); v.retarget = 0; },
+    tick(v, dt) {
+      v.t = (v.t || 0) + dt; v.retarget -= dt;
+      const it = v.it, run = v.cast[0] === it ? v.cast[1] : v.cast[0];
+      if (v.retarget <= 0) {
+        v.retarget = 0.3;
+        it.target = { x: run.pos.x, z: run.pos.z };
+        const fx = run.pos.x - it.pos.x, fz = run.pos.z - it.pos.z, fl = Math.hypot(fx, fz) || 1;
+        run.target = { x: clamp(run.pos.x + fx / fl * 3, -8, 8), z: clamp(run.pos.z + fz / fl * 3, -8, 8) };
+      }
+      if (it.pos.distanceTo(run.pos) < it.bodyR + run.bodyR + 0.2) {
+        v.it = run; run.squashVel -= 2; it.squashVel -= 1;
+        spawnHearts(run.pos.x, aboveHead(run), run.pos.z, 3, run.size); v.retarget = 0;
+      }
+      return v.t >= v.dur;
+    } },
+];
+function tickDirector(dt) {
+  director.clock += dt;
+  for (let i = director.active.length - 1; i >= 0; i--) {
+    const v = director.active[i];
+    v.cast = v.cast.filter(c => critters.includes(c) && !c.controlled);
+    if (v.it && !v.cast.includes(v.it)) v.it = v.cast[0];
+    const done = v.cast.length < v.row.min || v.row.tick(v, dt);
+    if (done) {
+      if (v.cast.length && v.row.end) v.row.end(v);
+      for (const c of v.cast) c.vignette = null;
+      director.cool.set(v.row.name, director.clock + v.row.cd);
+      director.active.splice(i, 1);
+    }
+  }
+  if (director.active.length < 2) {
+    const opts = [];
+    for (const row of VIGNETTES) {
+      if (director.clock < (director.cool.get(row.name) || 0)) continue;
+      const cast = row.find();
+      if (cast && cast.length >= row.min) opts.push({ row, cast });
+    }
+    if (opts.length) {
+      let tot = 0; for (const o of opts) tot += o.row.weight || 1;
+      let pick = rng() * tot, chosen = opts[0];
+      for (const o of opts) { pick -= o.row.weight || 1; if (pick <= 0) { chosen = o; break; } }
+      const v = { row: chosen.row, cast: chosen.cast, t: 0 };
+      for (const c of v.cast) c.vignette = chosen.row.name;
+      chosen.row.start(v);
+      director.active.push(v);
+    }
+  }
+}
+
 class Critter {
   constructor(recipe, x, z, heading) {
     this.id = critterSerial++;
@@ -847,6 +971,8 @@ class Critter {
     this.quat = new THREE.Quaternion();
     this.yawQuat = new THREE.Quaternion();
     this.target = null;
+    this.vignette = null;   // name of the autonomous behavior currently owning this critter (nap/gather/tag)
+    this.napping = false;
     this.lookDir = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
     this.lookTimer = rr(1, 4);
     this.gazeAt = null; this.gazeT = 0;
@@ -1306,6 +1432,7 @@ class Critter {
   }
 
   wander(dt) {
+    if (this.vignette) return; // a director vignette owns this critter's target/gaze right now
     this.wanderTimer -= dt;
     if (this.wanderTimer <= 0 && !this.target) {
       this.wanderTimer = rr(3.5, 9);
@@ -1320,6 +1447,10 @@ class Critter {
         if (buddy) {
           this.gazeAt = buddy; this.gazeT = rr(1.5, 3);
           if (rng() < 0.6) spawnPop(this.pos.x, aboveHead(this), this.pos.z, questTex, 0.24 * this.size, 0.8, 0.35); // noticed a neighbor
+          if (rng() < 0.3) { // curious: amble over and hang out a body-length away
+            const dx = this.pos.x - buddy.pos.x, dz = this.pos.z - buddy.pos.z, dl = Math.hypot(dx, dz) || 1;
+            this.target = { x: buddy.pos.x + dx / dl * (0.9 + this.bodyR), z: buddy.pos.z + dz / dl * (0.9 + this.bodyR) };
+          }
         }
         else {
           const a = rng() * TAU;
@@ -2041,6 +2172,7 @@ class Critter {
       }
       else blinkS = 1 - Math.sin(Math.PI * this.blinkT) * 0.93;
     }
+    if (this.napping) blinkS = Math.min(blinkS, 0.1); // eyes shut while dozing
 
     for (const e of this.eyes) {
       if (this.hasHead) V[0].copy(e.local).applyQuaternion(this.headQuat).add(this.headPos);
@@ -3068,6 +3200,7 @@ window.CRITTERS = {
   share: () => shareCritter(),
   _enc: r => encodeRecipe(r),
   _hearts: () => heartPool.filter(s => s.visible).length,
+  _vignettes: () => director.active.map(v => ({ name: v.row.name, cast: v.cast.length })),
   _programs: () => renderer.info.programs.length,
   view: (i, theta = 0, dist = 3.2, h = 0.35) => {
     // negative i inspects a prop instead of a critter: -1 -> props[0], -2 -> props[1], ...
@@ -3093,6 +3226,7 @@ function tick() {
     fps = fps * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
     updatePlayers(dt);
     separate(dt);
+    tickDirector(dt);
     for (const c of critters) c.update(dt);
     updateTrees(dt);
     updateDust(dt);
