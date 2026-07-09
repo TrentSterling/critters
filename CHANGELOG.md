@@ -11,11 +11,17 @@ All notable changes to critters. "Confirmed" means verified live by a human, not
 - SDF blend-shell meadow: trees (swaying canopies), half-buried rocks, mushrooms with decal spots, flower tufts. Seeded scatter, re-rolls with the scene, ~11 props, zero plain meshes: everything is the same prim + shader pipeline as the creatures.
 - `tools/inspect.mjs` multi-angle visual QA harness + `CRITTERS.view(i, theta, dist, h)` camera API.
 - Idle jiggle on all archetypes, wavier tree canopies, soft collision reactions instead of hard wall stops.
-- In progress: owl archetype (perch + glide, tree perches, head swivel), name-to-critter, ambient audio + cloud shadows, ecology behaviors.
+- Autonomous ecology: a vignette director runs 1-2 little scenes at a time with zero input — critters nap (eyes shut, zzz, wake with a jiggle), gather and peck-bob around a mushroom, play tag (roles swap on a happy bounce), greet each other, and idly amble over to a neighbor out of curiosity. Weighted so the meadow never goes to chaos; owls keep their own perch/glide life.
+- Procedural per-archetype voices (chirp / squeak / buzz / hiss / hoot, pitch scaled by size) with occasional ambient self-chatter; a music-note pops overhead and nearby critters glance over. Petting, tag swaps and nap wake-ups all vocalize.
+- Reaction pops: a "?" floats up when a critter notices a neighbor; a "!" and a star burst punctuate a solid bump.
+- Chunky bear/ox quadruped variant (thicker low-slung body, stubby legs, slow heavy lumber) rolls ~1-in-4 on quadruped spawns.
+- Livelier idle: gentle head sway at rest; idle tail/ear flicks scale up when a critter stops moving.
+- In progress: name-to-critter, ambient audio + cloud shadows, more autonomous vignettes.
 
 ### Fixed
 - Eyes sit on the live union surface (no more buried faces); added saccade micro-movements.
 - Legs tuck during airborne state and re-plant with landing juice; no more mid-air stilt locks.
+- Anti-embed collision: the soft separation push now ramps with overlap depth past ~40%, so a driven/possessed critter can no longer bury itself inside another and stick there.
 - Reroll hitch (CONFIRMED faster by Trent): first frame after reroll cost ~920ms of shader compilation because every critter compiled unique programs (per-critter `PRIM_COUNT` define). Now one shared program (`PRIM_COUNT = 40` + `uCount` uniform): 920ms -> 44ms, 21x.
 - Inward face creases at prim overlaps (quad neck): buried vertices now tuck a hair under the skin instead of deep below it.
 - "Vertex explosion" shrapnel spikes: Newton projection steps are clamped, bad gradients in blend valleys can no longer launch vertices.
