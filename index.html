@@ -633,6 +633,71 @@ function updateRings(dt) {
   }
 }
 
+// ---------- reaction pops + bump stars (comic-book beats, alpha only — matches the pastel look) ----------
+function glyphTex(draw) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  draw(g);
+  return new THREE.CanvasTexture(c);
+}
+const bangTex = glyphTex(g => {
+  g.fillStyle = '#ffd23f'; g.strokeStyle = '#8a5a0e'; g.lineWidth = 5;
+  g.font = 'bold 54px system-ui,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.strokeText('!', 32, 34); g.fillText('!', 32, 34);
+});
+const questTex = glyphTex(g => {
+  g.fillStyle = '#9fd6ff'; g.strokeStyle = '#1c4a70'; g.lineWidth = 5;
+  g.font = 'bold 48px system-ui,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.strokeText('?', 32, 34); g.fillText('?', 32, 34);
+});
+const starTex = glyphTex(g => {
+  g.translate(32, 32); g.fillStyle = '#fff4c2';
+  g.beginPath();
+  for (let i = 0; i < 8; i++) { const a = i / 8 * TAU, rd = i % 2 ? 8 : 26; g[i ? 'lineTo' : 'moveTo'](Math.cos(a) * rd, Math.sin(a) * rd); }
+  g.closePath(); g.fill();
+});
+const popPool = [];
+for (let i = 0; i < 16; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: bangTex, transparent: true, opacity: 0, depthWrite: false }));
+  s.visible = false;
+  s.userData = { life: 0, dur: 0.7, size: 1, rise: 0, spin: 0 };
+  dustGroup.add(s);
+  popPool.push(s);
+}
+let popIdx = 0;
+function spawnPop(x, y, z, tex, size = 0.3, dur = 0.7, rise = 0.4, spin = 0) {
+  const s = popPool[popIdx++ % popPool.length];
+  s.material.map = tex;
+  s.position.set(x, y, z);
+  s.material.rotation = 0;
+  const u = s.userData;
+  u.life = 0; u.dur = dur; u.size = size; u.rise = rise; u.spin = spin;
+  s.visible = true;
+}
+function updatePops(dt) {
+  for (const s of popPool) {
+    if (!s.visible) continue;
+    const u = s.userData;
+    u.life += dt;
+    const t = u.life / u.dur;
+    if (t >= 1) { s.visible = false; continue; }
+    s.position.y += u.rise * dt;
+    if (u.spin) s.material.rotation += u.spin * dt;
+    // punchy scale-in (0 -> 1.25 -> 1.0), then hold, then fade out over the last 30%
+    let sc;
+    if (t < 0.12) sc = (t / 0.12) * 1.25;
+    else if (t < 0.22) sc = lerp(1.25, 1.0, (t - 0.12) / 0.1);
+    else sc = 1.0;
+    sc *= u.size;
+    s.scale.set(sc, sc, 1);
+    s.material.opacity = t > 0.7 ? (1 - t) / 0.3 : 1;
+  }
+}
+// world-space point a hair above a critter's head, for reaction pops
+function aboveHead(c) {
+  return groundY(c.pos.x, c.pos.z) + (c.airY || 0) + c.bodyY + c.bodyR + 0.3 * c.size;
+}
+
 // ---------- IK ----------
 function solveIK(hip, target, l1, l2, pole, outKnee) {
   const dx = target.x - hip.x, dy = target.y - hip.y, dz = target.z - hip.z;
@@ -1252,7 +1317,10 @@ class Critter {
         this.target = { x: tx, z: tz };
       } else {
         const buddy = rng() < 0.45 ? this.nearestBuddy(4) : null;
-        if (buddy) { this.gazeAt = buddy; this.gazeT = rr(1.5, 3); }
+        if (buddy) {
+          this.gazeAt = buddy; this.gazeT = rr(1.5, 3);
+          if (rng() < 0.6) spawnPop(this.pos.x, aboveHead(this), this.pos.z, questTex, 0.24 * this.size, 0.8, 0.35); // noticed a neighbor
+        }
         else {
           const a = rng() * TAU;
           this.lookDir.set(Math.sin(a), rr(-0.1, 0.25), Math.cos(a)).normalize();
@@ -1855,7 +1923,8 @@ class Critter {
         rp.idleTimer -= dt;
         if (rp.idleTimer <= 0) {
           rp.idleTimer = rr(1.5, 4);
-          const kick = rp.rope.segLen * rr(0.4, 0.8);
+          // F4: idle critters get bigger, livelier flicks; moving ones stay subtle (gait already drives them)
+          const kick = rp.rope.segLen * rr(0.4, 0.8) * clamp(1.4 - this.speedN, 0.6, 1.4);
           const ang = rng() * TAU;
           const pt = rp.rope.pts[rp.idleMid];
           pt.x += Math.sin(ang) * kick;
@@ -1929,7 +1998,10 @@ class Critter {
     }
     // head look springs — owls get a much wider swivel with a snappier catch-up
     const yawMax = this.arch === 'owl' ? 1.4 : 0.55;
-    const wantYaw = clamp(angleDiff(Math.atan2(this.lookDir.x, this.lookDir.z), this.heading), -yawMax, yawMax);
+    let wantYawRaw = angleDiff(Math.atan2(this.lookDir.x, this.lookDir.z), this.heading);
+    // F4: gentle idle head sway so heads aren't perfectly locked when nothing's being watched
+    if (!this.target && !this.gazeAt && !this.controlled) wantYawRaw += Math.sin(this.time * 0.5 + this.id) * 0.08;
+    const wantYaw = clamp(wantYawRaw, -yawMax, yawMax);
     this.headYaw = lerp(this.headYaw, wantYaw, Math.min(1, (this.arch === 'owl' ? 9 : 6) * dt));
     this.headPitch = lerp(this.headPitch, clamp(-this.lookDir.y * 0.8, -0.3, 0.25), Math.min(1, 5 * dt));
 
@@ -2930,7 +3002,10 @@ function separate(dt) {
       const d = Math.sqrt(dx * dx + dz * dz);
       const min = (a.bodyR + b.bodyR) * 1.9;
       if (d < min && d > 1e-4) {
-        const push = (min - d) * 1.6 * dt;
+        // ramp the push once overlap passes ~40% so a driven critter can't embed in another
+        const ov = (min - d) / min;
+        const boost = ov > 0.4 ? 1 + 6 * ((ov - 0.4) / 0.6) ** 2 : 1;
+        const push = (min - d) * 1.6 * boost * dt;
         const nx = dx / d, nz = dz / d;
         a.pos.x -= nx * push; a.pos.z -= nz * push;
         b.pos.x += nx * push; b.pos.z += nz * push;
@@ -2952,6 +3027,9 @@ function separate(dt) {
             const mx = (a.pos.x + b.pos.x) * 0.5, mz = (a.pos.z + b.pos.z) * 0.5;
             const my = groundY(mx, mz) + Math.max(a.bodyY, b.bodyY) * 0.3;
             spawnDust(mx, my, mz, 3, 0.14 * Math.max(a.size, b.size), 0.13 * Math.max(a.size, b.size), 0.35);
+            if (amt > 1.2) spawnPop(mx, my + 0.25 * Math.max(a.size, b.size), mz, starTex, 0.26 * Math.max(a.size, b.size), 0.4, 0.5, 5);
+            // "!" surprise pop above whoever took the bigger hit, on a solid bump
+            if (amt > 2.2) { const v = bMul >= aMul ? b : a; spawnPop(v.pos.x, aboveHead(v), v.pos.z, bangTex, 0.32 * v.size, 0.7, 0.5); }
             if (amt > 2.4) sfx('land');
           }
         }
@@ -3020,6 +3098,7 @@ function tick() {
     updateDust(dt);
     updateHearts(dt);
     updateRings(dt);
+    updatePops(dt);
     updatePlayersCamera(dt);
   }
   controls.update();
