@@ -978,7 +978,7 @@ const VIGNETTES = [
       if (!a.target && !b.target) { // both arrived: look at each other, exchange bounces
         a.gazeAt = b; a.gazeT = 1; b.gazeAt = a; b.gazeT = 1;
         if (v.bt <= 0) {
-          v.bt = rr(0.7, 1.3); a.squashVel -= 1.2; b.squashVel -= 1.2;
+          v.bt = rr(0.7, 1.3); a.squashVel -= 1.2; b.squashVel -= 1.2; a.puffK = 1.18; b.puffK = 1.18;
           if (!v.bounced) { v.bounced = true; spawnHearts((a.pos.x + b.pos.x) / 2, aboveHead(a), (a.pos.z + b.pos.z) / 2, 3, a.size); a.voice(); }
         }
       }
@@ -1004,7 +1004,7 @@ const VIGNETTES = [
         run.target = { x: clamp(run.pos.x + fx / fl * 3, -8, 8), z: clamp(run.pos.z + fz / fl * 3, -8, 8) };
       }
       if (it.pos.distanceTo(run.pos) < it.bodyR + run.bodyR + 0.2) {
-        v.it = run; run.squashVel -= 2; it.squashVel -= 1;
+        v.it = run; run.squashVel -= 2; it.squashVel -= 1; run.puffK = 1.2;
         spawnHearts(run.pos.x, aboveHead(run), run.pos.z, 3, run.size); run.voice(); v.retarget = 0;
       }
       return v.t >= v.dur;
@@ -1030,6 +1030,27 @@ const VIGNETTES = [
     tick(v, dt) {
       v.t = (v.t || 0) + dt; const c = v.cast[0], a = v.ph + v.t * v.sp;
       c.target = { x: clamp(v.tree.pos.x + Math.sin(a) * v.rad, -8, 8), z: clamp(v.tree.pos.z + Math.cos(a) * v.rad, -8, 8) };
+      return v.t >= v.dur;
+    } },
+
+  // serpents line up nose-to-tail and follow the leader in a conga
+  { name: 'conga', min: 2, cd: 14, weight: 0.85,
+    find() {
+      const s = idleCritters(c => c.arch === 'serpent');
+      for (let i = 0; i < s.length; i++) for (let j = i + 1; j < s.length; j++)
+        if (s[i].pos.distanceTo(s[j].pos) < 6) return [s[i], s[j]];
+      return null;
+    },
+    start(v) { v.dur = rr(8, 14); },
+    tick(v, dt) {
+      v.t = (v.t || 0) + dt;
+      const lead = v.cast[0];
+      if (!lead.target) { const a = lead.heading + rr(-0.5, 0.5); lead.target = { x: clamp(lead.pos.x + Math.sin(a) * 2.5, -7, 7), z: clamp(lead.pos.z + Math.cos(a) * 2.5, -7, 7) }; }
+      const hx = Math.sin(lead.heading), hz = Math.cos(lead.heading);
+      for (let i = 1; i < v.cast.length; i++) {
+        const f = v.cast[i], gap = (1.1 + f.bodyR) * i;
+        f.target = { x: clamp(lead.pos.x - hx * gap, -8, 8), z: clamp(lead.pos.z - hz * gap, -8, 8) };
+      }
       return v.t >= v.dur;
     } },
 ];
@@ -1102,6 +1123,7 @@ class Critter {
     this.spawnT = 0; // spawn pop
     this.chatterTimer = rr(6, 16); this.voiceCooldown = 0; // ambient per-archetype voice
     this.puffK = 1; // whole-body inflate on happy moments (springs back to 1)
+    this.quirkTimer = rr(4, 9); // per-archetype idle fidget
     // hopper state
     this.hState = 'idle'; this.hT = rr(0, 1); this.hVel = new THREE.Vector3();
     // flyer
@@ -1496,6 +1518,18 @@ class Critter {
     }
   }
 
+  quirk() {
+    // a small idle fidget, flavored by the critter's own rig: leg critters shuffle a foot,
+    // tailed/eared ones flick their ropes, serpents shiver — all via existing systems
+    this.squashVel -= 0.22;
+    if (this.legs && this.legs.length && this.airY === 0) {
+      const leg = this.legs[(rng() * this.legs.length) | 0];
+      if (leg.swingT < 0) { leg.swingT = 0; leg.swingDur = rr(0.28, 0.42); leg.swingFrom.copy(leg.planted); leg.cooldown = 0.5; }
+    }
+    for (const rp of this.ropes) rp.idleTimer = 0;
+    if (this.arch === 'serpent') this.slitherT += rr(0.6, 1.2);
+  }
+
   // ============ per-frame ============
   update(dt) {
     this.time += dt;
@@ -1512,6 +1546,11 @@ class Critter {
     if (this.chatterTimer <= 0) {
       this.chatterTimer = rr(8, 20);
       if (!this.napping && !this.controlled && this.speedN < 0.3 && rng() < 0.5) this.voice();
+    }
+    this.quirkTimer -= dt;
+    if (this.quirkTimer <= 0) {
+      this.quirkTimer = rr(4, 9);
+      if (!this.napping && !this.controlled && !this.vignette && this.speedN < 0.12) this.quirk();
     }
     if (this.arch === 'hopper') this.updateHopper(dt);
     else if (this.arch === 'flyer') this.updateFlyer(dt);
