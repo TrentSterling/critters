@@ -1019,6 +1019,7 @@ const VIGNETTES = [
       v.t = (v.t || 0) + dt; const c = v.cast[0];
       c.zzzT -= dt;
       if (c.zzzT <= 0) { c.zzzT = rr(1.3, 2.3); spawnPop(c.pos.x + 0.12 * c.size, aboveHead(c), c.pos.z, zzzTex, 0.2 * c.size, 1.7, 0.4); }
+      c.dipVel -= 14 * dt; // settle down while dozing: body sinks, legs stay planted = a hunkered rest
       return v.t >= v.dur;
     },
     end(v) { const c = v.cast[0]; c.napping = false; c.squashVel -= 2.5; c.blinkT = 0; c.puffK = 1.22; c.voice(); // wake stretch
