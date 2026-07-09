@@ -1231,6 +1231,25 @@ const VIGNETTES = [
       }
       return v.t >= v.dur;
     } },
+
+  // 3-4 legged critters fall in line behind a leader and follow it across the meadow (a parade)
+  { name: 'parade', min: 3, cd: 16, weight: 0.9,
+    find() {
+      const p = idleCritters(c => !c.chain && c.legs && c.legs.length);
+      return p.length >= 3 ? p.slice(0, 4) : null;
+    },
+    start(v) { v.dur = rr(9, 15); v.lead = v.cast[0]; },
+    tick(v, dt) {
+      v.t = (v.t || 0) + dt;
+      const lead = v.lead;
+      if (!lead.target) { const a = lead.heading + rr(-0.6, 0.6); lead.target = { x: clamp(lead.pos.x + Math.sin(a) * 2.5, -7, 7), z: clamp(lead.pos.z + Math.cos(a) * 2.5, -7, 7) }; }
+      const hx = Math.sin(lead.heading), hz = Math.cos(lead.heading);
+      for (let i = 1; i < v.cast.length; i++) {
+        const f = v.cast[i], gap = (1.0 + f.bodyR + lead.bodyR) * i;
+        f.target = { x: clamp(lead.pos.x - hx * gap, -8, 8), z: clamp(lead.pos.z - hz * gap, -8, 8) };
+      }
+      return v.t >= v.dur;
+    } },
 ];
 function tickDirector(dt) {
   director.clock += dt;
