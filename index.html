@@ -760,6 +760,40 @@ function aboveHead(c) {
   return groundY(c.pos.x, c.pos.z) + (c.airY || 0) + c.bodyY + c.bodyR + 0.3 * c.size;
 }
 
+// ---------- ambient meadow motes: leaves drift off trees, pollen off flowers (alpha, tinted) ----------
+const moteTex = softCircleTexture(0.2);
+const motePool = [];
+for (let i = 0; i < 40; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: moteTex, transparent: true, opacity: 0, depthWrite: false }));
+  s.visible = false;
+  s.userData = { life: 0, dur: 1, size: 1, vy: 0, sway: 0, phase: 0 };
+  dustGroup.add(s);
+  motePool.push(s);
+}
+let moteIdx = 0;
+function spawnMote(x, y, z, color, size, dur, vy, sway) {
+  const s = motePool[moteIdx++ % motePool.length];
+  s.material.color.set(color);
+  s.position.set(x, y, z);
+  const u = s.userData;
+  u.life = 0; u.dur = dur; u.size = size; u.vy = vy; u.sway = sway; u.phase = rng() * TAU;
+  s.visible = true;
+}
+function updateMotes(dt) {
+  for (const s of motePool) {
+    if (!s.visible) continue;
+    const u = s.userData; u.life += dt; const t = u.life / u.dur;
+    if (t >= 1) { s.visible = false; continue; }
+    u.phase += dt * 1.5;
+    s.position.y += u.vy * dt;
+    s.position.x += Math.sin(u.phase) * u.sway * dt;
+    s.position.z += Math.cos(u.phase * 0.8) * u.sway * dt;
+    const sc = u.size * (0.6 + Math.min(1, t * 3) * 0.4);
+    s.scale.set(sc, sc, 1);
+    s.material.opacity = (t < 0.15 ? t / 0.15 : (1 - t) / 0.85) * 0.7;
+  }
+}
+
 // ---------- IK ----------
 function solveIK(hip, target, l1, l2, pole, outKnee) {
   const dx = target.x - hip.x, dy = target.y - hip.y, dz = target.z - hip.z;
@@ -2604,6 +2638,13 @@ function updateTrees(dt) {
         p.fA[o] = nx; p.fA[o + 2] = nz;
         p.fB[o] = nx; p.fB[o + 2] = nz;
       }
+      // ambient leaf drift off a random canopy blob
+      p.leafDropT = (p.leafDropT != null ? p.leafDropT : rr(3, 6)) - dt;
+      if (p.leafDropT <= 0) {
+        p.leafDropT = rr(4, 9);
+        const bl = p.sway.list[(rng() * p.sway.list.length) | 0], bo = bl.i * 4;
+        spawnMote(p.fA[bo], p.fA[bo + 1], p.fA[bo + 2], '#86ad4c', rr(0.06, 0.1), rr(3.5, 5.5), -0.32, 0.35);
+      }
     } else if (p.wiggle) {
       for (const s of p.wiggle.list) {
         const off = Math.sin(propTime * 1.1 + s.phase) * 0.018;
@@ -2612,6 +2653,15 @@ function updateTrees(dt) {
         const o = s.i * 4;
         p.fA[o] = nx; p.fA[o + 2] = nz;
         p.fB[o] = nx; p.fB[o + 2] = nz;
+      }
+      // ambient pollen off flower heads
+      if (p.kind === 'flower') {
+        p.pollenT = (p.pollenT != null ? p.pollenT : rr(2, 4)) - dt;
+        if (p.pollenT <= 0) {
+          p.pollenT = rr(3, 7);
+          const hd = p.wiggle.list[(rng() * p.wiggle.list.length) | 0], ho = hd.i * 4;
+          spawnMote(p.fA[ho], p.fA[ho + 1], p.fA[ho + 2], '#ffe6a0', rr(0.035, 0.055), rr(2.5, 4), 0.1, 0.28);
+        }
       }
     }
   }
@@ -3375,6 +3425,7 @@ window.CRITTERS = {
   _enc: r => encodeRecipe(r),
   _hearts: () => heartPool.filter(s => s.visible).length,
   _vignettes: () => director.active.map(v => ({ name: v.row.name, cast: v.cast.length })),
+  _motes: () => motePool.filter(s => s.visible).length,
   _programs: () => renderer.info.programs.length,
   view: (i, theta = 0, dist = 3.2, h = 0.35) => {
     // negative i inspects a prop instead of a critter: -1 -> props[0], -2 -> props[1], ...
@@ -3407,6 +3458,7 @@ function tick() {
     updateHearts(dt);
     updateRings(dt);
     updatePops(dt);
+    updateMotes(dt);
     updatePlayersCamera(dt);
   }
   controls.update();

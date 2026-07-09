@@ -14,6 +14,7 @@ All notable changes to critters. "Confirmed" means verified live by a human, not
 - Autonomous ecology: a vignette director runs 1-2 little scenes at a time with zero input — critters nap (eyes shut, zzz, wake with a jiggle), gather and peck-bob around a mushroom, play tag (roles swap on a happy bounce), greet each other, a flyer lazily circles a tree canopy, serpents form a conga line behind a leader, and idlers amble over to a neighbor out of curiosity. Weighted so the meadow never goes to chaos; owls keep their own perch/glide life.
 - Procedural per-archetype voices (chirp / squeak / buzz / hiss / hoot, pitch scaled by size) with occasional ambient self-chatter; a music-note pops overhead and nearby critters glance over. Petting, tag swaps and nap wake-ups all vocalize.
 - Reaction pops: a "?" floats up when a critter notices a neighbor; a "!" and a star burst punctuate a solid bump.
+- Ambient meadow motes: leaves drift down off the tree canopies and pollen floats up from flowers, so the world feels alive even with no critters nearby.
 - Chunky bear/ox quadruped variant (thicker low-slung body, stubby legs, slow heavy lumber) rolls ~1-in-4 on quadruped spawns.
 - Livelier idle: gentle head sway at rest; idle tail/ear flicks scale up when a critter stops moving; each archetype throws its own little idle fidget (a foot shuffle, an ear flick, a serpent shiver). Critters puff up happily when petted, greeting, tagging, or waking from a nap.
 - In progress: name-to-critter, ambient audio + cloud shadows, more autonomous vignettes.
