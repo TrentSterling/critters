@@ -549,6 +549,58 @@ function sfx(kind) {
   o.start(t); o.stop(t + P.dur + 0.02);
 }
 
+// ---------- procedural per-archetype voices (F11 Y): chirp/squeak/buzz/hiss/hoot, pitch by size ----------
+const VOICE_FAM = {
+  chirp:  { type: 'sine',     f0: 1400, f1: 2000, dur: 0.09, vol: 0.11, grains: 2 },
+  squeak: { type: 'triangle', f0: 1100, f1: 1700, dur: 0.07, vol: 0.10, grains: 3 },
+  buzz:   { type: 'sawtooth', f0: 180,  f1: 240,  dur: 0.22, vol: 0.06, tremolo: 28 },
+  hiss:   { type: 'noise',    dur: 0.30, vol: 0.09 },
+  hoot:   { type: 'sine',     f0: 340,  f1: 260,  dur: 0.34, vol: 0.10, formant: [500, 1000] },
+};
+const VOICE_BY_ARCH = { biped: 'squeak', quadruped: 'chirp', multiped: 'buzz', hopper: 'squeak', flyer: 'chirp', serpent: 'hiss', owl: 'hoot' };
+let noiseBuf = null;
+function voiceSfx(c) {
+  if (!soundOn || !AC || AC.state !== 'running') return;
+  const fam = VOICE_FAM[VOICE_BY_ARCH[c.arch] || 'chirp']; if (!fam) return;
+  const pm = clamp(1 / c.size, 0.55, 2.2);
+  const t = AC.currentTime;
+  const out = AC.createGain(); out.gain.value = 1; out.connect(AC.destination);
+  if (fam.type === 'noise') {
+    if (!noiseBuf) {
+      noiseBuf = AC.createBuffer(1, (AC.sampleRate * 0.4) | 0, AC.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = AC.createBufferSource(); src.buffer = noiseBuf;
+    const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1100 * pm;
+    const g = AC.createGain(); src.connect(hp); hp.connect(g); g.connect(out);
+    g.gain.setValueAtTime(fam.vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + fam.dur);
+    src.start(t); src.stop(t + fam.dur + 0.02);
+    return;
+  }
+  const grains = fam.grains || 1;
+  for (let i = 0; i < grains; i++) {
+    const st = t + i * 0.08;
+    const o = AC.createOscillator(); o.type = fam.type;
+    o.frequency.setValueAtTime(fam.f0 * pm * (0.94 + Math.random() * 0.12), st);
+    o.frequency.exponentialRampToValueAtTime(Math.max(40, fam.f1 * pm), st + fam.dur);
+    let node = o;
+    if (fam.formant) for (const ff of fam.formant) {
+      const bq = AC.createBiquadFilter(); bq.type = 'peaking'; bq.frequency.value = ff * pm; bq.Q.value = 6; bq.gain.value = 10;
+      node.connect(bq); node = bq;
+    }
+    const g = AC.createGain(); node.connect(g); g.connect(out);
+    if (fam.tremolo) {
+      const lfo = AC.createOscillator(); lfo.frequency.value = fam.tremolo;
+      const lg = AC.createGain(); lg.gain.value = fam.vol * 0.5; lfo.connect(lg); lg.connect(g.gain);
+      g.gain.value = fam.vol * 0.5; lfo.start(st); lfo.stop(st + fam.dur + 0.02);
+    } else {
+      g.gain.setValueAtTime(fam.vol, st);
+    }
+    g.gain.exponentialRampToValueAtTime(0.001, st + fam.dur);
+    o.start(st); o.stop(st + fam.dur + 0.05);
+  }
+}
+
 // ---------- heart particles (petting) ----------
 const heartTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -654,6 +706,11 @@ const zzzTex = glyphTex(g => {
   g.fillStyle = '#cfe6ff'; g.strokeStyle = '#3a5a78'; g.lineWidth = 4;
   g.font = 'bold 40px system-ui,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.strokeText('z', 32, 34); g.fillText('z', 32, 34);
+});
+const noteTex = glyphTex(g => {
+  g.fillStyle = '#c9b3ff'; g.strokeStyle = '#4a3a70'; g.lineWidth = 4;
+  g.font = 'bold 42px system-ui,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.strokeText('♪', 32, 34); g.fillText('♪', 32, 34);
 });
 const starTex = glyphTex(g => {
   g.translate(32, 32); g.fillStyle = '#fff4c2';
@@ -866,7 +923,7 @@ const VIGNETTES = [
       if (c.zzzT <= 0) { c.zzzT = rr(1.3, 2.3); spawnPop(c.pos.x + 0.12 * c.size, aboveHead(c), c.pos.z, zzzTex, 0.2 * c.size, 1.7, 0.4); }
       return v.t >= v.dur;
     },
-    end(v) { const c = v.cast[0]; c.napping = false; c.squashVel -= 2.5; c.blinkT = 0;
+    end(v) { const c = v.cast[0]; c.napping = false; c.squashVel -= 2.5; c.blinkT = 0; c.voice();
       spawnDust(c.pos.x, groundY(c.pos.x, c.pos.z) + 0.04, c.pos.z, 3, 0.12 * c.size, 0.12 * c.size, 0.3); } },
 
   // 2-3 critters gather around a mushroom, ring up, and peck-bob while looking at it
@@ -920,7 +977,7 @@ const VIGNETTES = [
       }
       if (it.pos.distanceTo(run.pos) < it.bodyR + run.bodyR + 0.2) {
         v.it = run; run.squashVel -= 2; it.squashVel -= 1;
-        spawnHearts(run.pos.x, aboveHead(run), run.pos.z, 3, run.size); v.retarget = 0;
+        spawnHearts(run.pos.x, aboveHead(run), run.pos.z, 3, run.size); run.voice(); v.retarget = 0;
       }
       return v.t >= v.dur;
     } },
@@ -992,6 +1049,7 @@ class Critter {
     this.saccadeTimer = rr(0.7, 2.5);
     this.saccadeX = 0; this.saccadeY = 0;
     this.spawnT = 0; // spawn pop
+    this.chatterTimer = rr(6, 16); this.voiceCooldown = 0; // ambient per-archetype voice
     // hopper state
     this.hState = 'idle'; this.hT = rr(0, 1); this.hVel = new THREE.Vector3();
     // flyer
@@ -1369,6 +1427,20 @@ class Critter {
     const gy = groundY(this.pos.x, this.pos.z);
     spawnHearts(this.pos.x, gy + this.airY + this.bodyY + this.bodyR + 0.25 * this.size, this.pos.z, 4, this.size);
     sfx('pet');
+    this.voice();
+  }
+
+  voice() {
+    if (this.voiceCooldown > 0) return;
+    this.voiceCooldown = 0.32;
+    voiceSfx(this);
+    spawnPop(this.pos.x, aboveHead(this), this.pos.z, noteTex, 0.2 * this.size, 0.8, 0.5, 3);
+    this.squashVel -= 0.35;
+    // nearby critters look over — a voice fans a little attention out
+    for (const o of critters) {
+      if (o === this || o.controlled || o.napping) continue;
+      if ((o.pos.x - this.pos.x) ** 2 + (o.pos.z - this.pos.z) ** 2 < 12 && rng() < 0.5) { o.gazeAt = this; o.gazeT = rr(0.8, 1.6); }
+    }
   }
 
   // ============ per-frame ============
@@ -1380,6 +1452,12 @@ class Critter {
     if (this.idleBumpTimer <= 0) {
       this.idleBumpTimer = rr(4, 9);
       if (this.speedN < 0.15) this.squashVel -= 0.4;
+    }
+    if (this.voiceCooldown > 0) this.voiceCooldown -= dt;
+    this.chatterTimer -= dt;
+    if (this.chatterTimer <= 0) {
+      this.chatterTimer = rr(8, 20);
+      if (!this.napping && !this.controlled && this.speedN < 0.3 && rng() < 0.5) this.voice();
     }
     if (this.arch === 'hopper') this.updateHopper(dt);
     else if (this.arch === 'flyer') this.updateFlyer(dt);
