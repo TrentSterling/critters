@@ -18,6 +18,9 @@ All notable changes to critters. "Confirmed" means verified live by a human, not
 - Gentle golden-hour drift: the sky slowly warms toward a soft golden horizon and cools back over a few minutes, so the meadow's mood shifts as you watch.
 - Ambient butterflies and bees: colorful butterflies drift flower to flower and a couple of bees buzz around faster and tighter. Critters glance up at ones that pass close.
 - Petting a critter sends a little wave of joy through its neighbors (they bounce and look over).
+- Face-button emotes: **E** (or gamepad **X**) = a happy pose (puff up, look at you, hearts); **Q** (or gamepad **B**) = a trick (joy-hop + stars). Acts on your possessed critter, or the one you're looking at.
+- Ambient audio bed: a soft wind (brown noise + slow gusts) with sparse birdsong under the voices; respects the mute toggle.
+- Two more vignettes: a solo yawn-stretch, and hopper races to a finish line.
 - Chunky bear/ox quadruped variant (thicker low-slung body, stubby legs, slow heavy lumber) rolls ~1-in-4 on quadruped spawns.
 - Livelier idle: gentle head sway at rest; idle tail/ear flicks scale up when a critter stops moving; each archetype throws its own little idle fidget (a foot shuffle, an ear flick, a serpent shiver). Critters puff up happily when petted, greeting, tagging, or waking from a nap.
 - In progress: name-to-critter, ambient audio + cloud shadows, more autonomous vignettes.

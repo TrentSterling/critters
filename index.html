@@ -3302,6 +3302,23 @@ function nearestCritterTo(x, z, freeOnly = false) {
 
 function possessedBy(c) { return players.find(p => p.critter === c) || null; }
 
+// face-button emotes: a happy pose (puff + look at you + hearts) or a trick (joy-hop + stars)
+function emote(c, kind) {
+  if (!c) return;
+  if (kind === 'pose') {
+    c.puffK = 1.45; c.squashVel += 1.8; c.voice();
+    spawnHearts(c.pos.x, aboveHead(c), c.pos.z, 4, c.size);
+    c.lookDir.subVectors(camera.position, c.pos).normalize(); c.gazeAt = null;
+  } else { // trick
+    if (['biped', 'quadruped', 'multiped'].includes(c.arch) && c.airY === 0) { c.jumpVy = 4.0 * Math.sqrt(c.size); c.airY = 0.001; }
+    if (c.chain) c.slitherT += 3;
+    c.squashVel -= 3.2; c.puffK = 1.2; c.voice();
+    const gy = groundY(c.pos.x, c.pos.z);
+    spawnDust(c.pos.x, gy + 0.04, c.pos.z, 6, 0.2 * c.size, 0.18 * c.size, 0.6);
+    for (let k = 0; k < 3; k++) spawnPop(c.pos.x + rr(-0.3, 0.3) * c.size, aboveHead(c) + rng() * 0.25, c.pos.z + rr(-0.3, 0.3) * c.size, starTex, 0.2 * c.size, 0.5, 0.6, 6);
+  }
+}
+
 function possess(p, c) {
   if (c && possessedBy(c)) return; // no stealing another player's critter
   if (p.critter) { p.critter.controlled = false; p.critter.input.set(0, 0, 0); }
@@ -3365,6 +3382,13 @@ addEventListener('keydown', e => {
     if (kp) removePlayer(kp);
     return;
   }
+  if (k === 'KeyE' || k === 'KeyQ') {
+    if (e.repeat) return;
+    const kp = keyPlayer();
+    const c = (kp && kp.critter) || nearestCritterTo(controls.target.x, controls.target.z, false);
+    emote(c, k === 'KeyE' ? 'pose' : 'trick');
+    return;
+  }
   if (!['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(k)) return;
   if (e.repeat) return;
   e.preventDefault();
@@ -3413,6 +3437,8 @@ function updatePlayers(dt) {
       const btn = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
       const edge = i => btn(i) && !p.prevButtons[i];
       if (edge(0)) c.wantJump = true;                                // A: jump/dash per archetype
+      if (edge(1)) emote(c, 'trick');                                // B: trick
+      if (edge(2)) emote(c, 'pose');                                 // X: pose
       if (edge(4)) cyclePlayer(p, -1);                               // LB
       if (edge(5)) cyclePlayer(p, 1);                                // RB
       for (let i = 0; i < gp.buttons.length; i++) p.prevButtons[i] = gp.buttons[i].pressed;
