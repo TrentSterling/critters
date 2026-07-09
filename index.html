@@ -1156,6 +1156,38 @@ const VIGNETTES = [
       }
       return v.t >= v.dur;
     } },
+
+  // a lone critter has a big yawn-stretch (looks up, stretches tall, then relaxes)
+  { name: 'stretch', min: 1, cd: 9, weight: 0.7,
+    find() { const p = idleCritters(c => !c.chain); return p.length ? [p[(rng() * p.length) | 0]] : null; },
+    start(v) { const c = v.cast[0]; c.target = null; v.dur = rr(2, 3); c.puffK = 1.25; c.squashVel += 1.6; },
+    tick(v, dt) { v.t = (v.t || 0) + dt; const c = v.cast[0]; c.lookDir.set(Math.sin(c.heading) * 0.3, 1, Math.cos(c.heading) * 0.3).normalize(); c.gazeAt = null; return v.t >= v.dur; },
+    end(v) { v.cast[0].squashVel -= 1.4; } },
+
+  // two or more hoppers race to a finish line; winner celebrates
+  { name: 'race', min: 2, cd: 13, weight: 0.9,
+    find() {
+      const h = idleCritters(c => c.arch === 'hopper');
+      for (let i = 0; i < h.length; i++) for (let j = i + 1; j < h.length; j++)
+        if (h[i].pos.distanceTo(h[j].pos) < 5) return [h[i], h[j]];
+      return null;
+    },
+    start(v) {
+      const c0 = v.cast[0], a = rng() * TAU, r = rr(3, 5), perp = a + Math.PI / 2;
+      v.fx = clamp(c0.pos.x + Math.sin(a) * r, -7, 7); v.fz = clamp(c0.pos.z + Math.cos(a) * r, -7, 7); v.dur = 9;
+      v.cast.forEach((c, i) => { c.target = { x: clamp(v.fx + Math.sin(perp) * (i - 0.5) * 0.8, -8, 8), z: clamp(v.fz + Math.cos(perp) * (i - 0.5) * 0.8, -8, 8) }; c.squashVel -= 1.5; });
+    },
+    tick(v, dt) {
+      v.t = (v.t || 0) + dt;
+      for (const c of v.cast) {
+        if (!c.target) c.target = { x: v.fx, z: v.fz }; // keep them heading to the line
+        if (Math.hypot(c.pos.x - v.fx, c.pos.z - v.fz) < 0.6) {
+          c.squashVel -= 2; c.puffK = 1.25; spawnHearts(c.pos.x, aboveHead(c), c.pos.z, 4, c.size); c.voice();
+          return true;
+        }
+      }
+      return v.t >= v.dur;
+    } },
 ];
 function tickDirector(dt) {
   director.clock += dt;
