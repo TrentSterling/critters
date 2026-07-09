@@ -1009,6 +1009,29 @@ const VIGNETTES = [
       }
       return v.t >= v.dur;
     } },
+
+  // a flyer lazily circles a tree canopy (fires with the default cast — everyone sees it)
+  { name: 'flyOrbit', min: 1, cd: 11, weight: 0.9,
+    find() {
+      const trees = props.filter(p => p.kind === 'tree');
+      if (!trees.length) return null;
+      for (const c of critters) {
+        if (c.arch !== 'flyer' || c.controlled || c.vignette) continue;
+        for (const t of trees) if (c.pos.distanceTo(t.pos) < 8) return [c];
+      }
+      return null;
+    },
+    start(v) {
+      const c = v.cast[0];
+      let best = null, bd = 1e9;
+      for (const t of props) { if (t.kind !== 'tree') continue; const d = t.pos.distanceToSquared(c.pos); if (d < bd) { bd = d; best = t; } }
+      v.tree = best; v.dur = rr(9, 15); v.rad = rr(1.3, 2.1); v.sp = rr(0.6, 1.0); v.ph = rng() * TAU;
+    },
+    tick(v, dt) {
+      v.t = (v.t || 0) + dt; const c = v.cast[0], a = v.ph + v.t * v.sp;
+      c.target = { x: clamp(v.tree.pos.x + Math.sin(a) * v.rad, -8, 8), z: clamp(v.tree.pos.z + Math.cos(a) * v.rad, -8, 8) };
+      return v.t >= v.dur;
+    } },
 ];
 function tickDirector(dt) {
   director.clock += dt;
