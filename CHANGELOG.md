@@ -15,6 +15,7 @@ All notable changes to critters. "Confirmed" means verified live by a human, not
 - Procedural per-archetype voices (chirp / squeak / buzz / hiss / hoot, pitch scaled by size) with occasional ambient self-chatter; a music-note pops overhead and nearby critters glance over. Petting, tag swaps and nap wake-ups all vocalize.
 - Reaction pops: a "?" floats up when a critter notices a neighbor; a "!" and a star burst punctuate a solid bump.
 - Ambient meadow motes: leaves drift down off the tree canopies and pollen floats up from flowers, so the world feels alive even with no critters nearby.
+- Gentle golden-hour drift: the sky slowly warms toward a soft golden horizon and cools back over a few minutes, so the meadow's mood shifts as you watch.
 - Chunky bear/ox quadruped variant (thicker low-slung body, stubby legs, slow heavy lumber) rolls ~1-in-4 on quadruped spawns.
 - Livelier idle: gentle head sway at rest; idle tail/ear flicks scale up when a critter stops moving; each archetype throws its own little idle fidget (a foot shuffle, an ear flick, a serpent shiver). Critters puff up happily when petted, greeting, tagging, or waking from a nap.
 - In progress: name-to-critter, ambient audio + cloud shadows, more autonomous vignettes.

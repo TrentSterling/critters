@@ -409,6 +409,18 @@ const sky = new THREE.Mesh(
 sky.frustumCulled = false;
 scene.add(sky);
 
+// gentle golden-hour drift: warm the sky over a slow cycle (backdrop only, no lighting change)
+const SKY_DAY_TOP = new THREE.Color('#6fbde9'), SKY_DAY_HOR = new THREE.Color('#e6f2ea');
+const SKY_EVE_TOP = new THREE.Color('#8ea6d6'), SKY_EVE_HOR = new THREE.Color('#f7e0c2');
+let dayClock = 0;
+function updateSky(dt) {
+  dayClock += dt;
+  const w = 0.5 - 0.5 * Math.cos(dayClock * (TAU / 210)); // 0..1..0 over ~3.5 min, starts at day
+  const g = w * 0.7; // cap the warmth so it never goes full sunset
+  sky.material.uniforms.uTop.value.copy(SKY_DAY_TOP).lerp(SKY_EVE_TOP, g);
+  sky.material.uniforms.uHor.value.copy(SKY_DAY_HOR).lerp(SKY_EVE_HOR, g);
+}
+
 // ---------- ground ----------
 function makeGroundTexture() {
   const c = document.createElement('canvas'); c.width = c.height = 512;
@@ -3426,6 +3438,7 @@ window.CRITTERS = {
   _hearts: () => heartPool.filter(s => s.visible).length,
   _vignettes: () => director.active.map(v => ({ name: v.row.name, cast: v.cast.length })),
   _motes: () => motePool.filter(s => s.visible).length,
+  _setDay: v => { dayClock = v; },
   _programs: () => renderer.info.programs.length,
   view: (i, theta = 0, dist = 3.2, h = 0.35) => {
     // negative i inspects a prop instead of a critter: -1 -> props[0], -2 -> props[1], ...
@@ -3459,6 +3472,7 @@ function tick() {
     updateRings(dt);
     updatePops(dt);
     updateMotes(dt);
+    updateSky(dt);
     updatePlayersCamera(dt);
   }
   controls.update();
