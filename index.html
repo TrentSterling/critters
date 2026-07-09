@@ -831,24 +831,28 @@ function addFlutter(kind) {
   s.visible = false; scene.add(s);
   butterflies.push({
     spr: s, kind, pos: new THREE.Vector3(rr(-6, 6), 0, rr(-6, 6)), target: null, t: rng() * TAU, retarget: 0,
-    h: kind === 'bee' ? rr(0.3, 0.6) : rr(0.5, 1.1), spd: kind === 'bee' ? 1.15 : 0.55, sz: kind === 'bee' ? 0.17 : 0.3, flap: kind === 'bee' ? 42 : 15,
+    h: kind === 'bee' ? rr(0.3, 0.6) : rr(0.5, 1.1), spd: kind === 'bee' ? 1.15 : 0.55, sz: kind === 'bee' ? 0.17 : 0.3, flap: kind === 'bee' ? 42 : 15, rest: 0,
   });
 }
 for (let i = 0; i < 4; i++) addFlutter('butterfly');
 for (let i = 0; i < 2; i++) addFlutter('bee');
 function updateButterflies(dt) {
   for (const b of butterflies) {
-    b.t += dt; b.retarget -= dt;
-    if (!b.target || b.retarget <= 0) {
-      b.retarget = b.kind === 'bee' ? rr(1.5, 3) : rr(2.5, 5.5);
-      const fls = props.filter(p => p.kind === 'flower' || p.kind === 'mushroom');
-      if (fls.length && rng() < (b.kind === 'bee' ? 0.85 : 0.7)) { const f = fls[(rng() * fls.length) | 0]; b.target = { x: f.pos.x + rr(-0.5, 0.5), z: f.pos.z + rr(-0.5, 0.5) }; }
-      else b.target = { x: rr(-7, 7), z: rr(-7, 7) };
+    b.t += dt;
+    if (b.rest > 0) { b.rest -= dt; } // pause on a flower for a beat
+    else {
+      b.retarget -= dt;
+      if (!b.target || b.retarget <= 0) {
+        b.retarget = b.kind === 'bee' ? rr(1.5, 3) : rr(2.5, 5.5);
+        const fls = props.filter(p => p.kind === 'flower' || p.kind === 'mushroom');
+        if (fls.length && rng() < (b.kind === 'bee' ? 0.85 : 0.7)) { const f = fls[(rng() * fls.length) | 0]; b.target = { x: f.pos.x + rr(-0.5, 0.5), z: f.pos.z + rr(-0.5, 0.5) }; }
+        else b.target = { x: rr(-7, 7), z: rr(-7, 7) };
+      }
+      const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z, d = Math.hypot(dx, dz) || 1;
+      const step = Math.min(1, b.spd * dt / d);
+      b.pos.x += dx * step; b.pos.z += dz * step;
+      if (d < 0.4) { b.target = null; b.rest = b.kind === 'bee' ? rr(0.4, 1.0) : rr(0.8, 2.2); }
     }
-    const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z, d = Math.hypot(dx, dz) || 1;
-    const step = Math.min(1, b.spd * dt / d);
-    b.pos.x += dx * step; b.pos.z += dz * step;
-    if (d < 0.4) b.target = null;
     const wob = b.kind === 'bee' ? 0.1 : 0.16;
     const gy = groundY(b.pos.x, b.pos.z);
     b.spr.position.set(b.pos.x + Math.sin(b.t * 3.1) * wob, gy + b.h + Math.sin(b.t * (b.kind === 'bee' ? 4 : 2)) * 0.12, b.pos.z + Math.cos(b.t * 2.5) * wob);
