@@ -816,32 +816,44 @@ const butterflyTex = glyphTex(g => {
   g.beginPath(); g.ellipse(9, 13, 8, 10, 0.2, 0, TAU); g.fill();
   g.fillStyle = '#3a2f42'; g.beginPath(); g.ellipse(0, 2, 3, 17, 0, 0, TAU); g.fill();
 });
-const butterflies = [];
-for (let i = 0; i < 4; i++) {
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: butterflyTex, transparent: true, opacity: 0.96, depthWrite: false }));
-  s.material.color.setHSL(rng(), 0.55, 0.68);
-  s.visible = false;
-  scene.add(s);
-  butterflies.push({ spr: s, pos: new THREE.Vector3(rr(-6, 6), 0, rr(-6, 6)), target: null, t: rng() * TAU, retarget: 0, h: rr(0.5, 1.1) });
+const beeTex = glyphTex(g => {
+  g.translate(32, 32);
+  g.fillStyle = 'rgba(255,255,255,0.85)';
+  g.beginPath(); g.ellipse(-10, -9, 8, 6, -0.4, 0, TAU); g.fill();
+  g.beginPath(); g.ellipse(10, -9, 8, 6, 0.4, 0, TAU); g.fill();
+  g.fillStyle = '#f2c94c'; g.beginPath(); g.ellipse(0, 4, 12, 16, 0, 0, TAU); g.fill();
+  g.fillStyle = '#3a2f1a'; g.fillRect(-12, -2, 24, 4); g.fillRect(-11, 7, 22, 4);
+});
+const butterflies = []; // flutterers: butterflies + a couple of bees
+function addFlutter(kind) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: kind === 'bee' ? beeTex : butterflyTex, transparent: true, opacity: 0.96, depthWrite: false }));
+  if (kind === 'bee') s.material.color.set('#ffffff'); else s.material.color.setHSL(rng(), 0.55, 0.68);
+  s.visible = false; scene.add(s);
+  butterflies.push({
+    spr: s, kind, pos: new THREE.Vector3(rr(-6, 6), 0, rr(-6, 6)), target: null, t: rng() * TAU, retarget: 0,
+    h: kind === 'bee' ? rr(0.3, 0.6) : rr(0.5, 1.1), spd: kind === 'bee' ? 1.15 : 0.55, sz: kind === 'bee' ? 0.17 : 0.3, flap: kind === 'bee' ? 42 : 15,
+  });
 }
+for (let i = 0; i < 4; i++) addFlutter('butterfly');
+for (let i = 0; i < 2; i++) addFlutter('bee');
 function updateButterflies(dt) {
   for (const b of butterflies) {
     b.t += dt; b.retarget -= dt;
     if (!b.target || b.retarget <= 0) {
-      b.retarget = rr(2.5, 5.5);
+      b.retarget = b.kind === 'bee' ? rr(1.5, 3) : rr(2.5, 5.5);
       const fls = props.filter(p => p.kind === 'flower' || p.kind === 'mushroom');
-      if (fls.length && rng() < 0.7) { const f = fls[(rng() * fls.length) | 0]; b.target = { x: f.pos.x + rr(-0.5, 0.5), z: f.pos.z + rr(-0.5, 0.5) }; }
+      if (fls.length && rng() < (b.kind === 'bee' ? 0.85 : 0.7)) { const f = fls[(rng() * fls.length) | 0]; b.target = { x: f.pos.x + rr(-0.5, 0.5), z: f.pos.z + rr(-0.5, 0.5) }; }
       else b.target = { x: rr(-7, 7), z: rr(-7, 7) };
     }
     const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z, d = Math.hypot(dx, dz) || 1;
-    const step = Math.min(1, 0.55 * dt / d);
+    const step = Math.min(1, b.spd * dt / d);
     b.pos.x += dx * step; b.pos.z += dz * step;
     if (d < 0.4) b.target = null;
-    const wx = Math.sin(b.t * 3.1) * 0.16, wz = Math.cos(b.t * 2.5) * 0.16;
+    const wob = b.kind === 'bee' ? 0.1 : 0.16;
     const gy = groundY(b.pos.x, b.pos.z);
-    b.spr.position.set(b.pos.x + wx, gy + b.h + Math.sin(b.t * 2) * 0.12, b.pos.z + wz);
-    const flap = 0.16 + 0.12 * Math.abs(Math.sin(b.t * 15));
-    b.spr.scale.set(flap * 2.1, 0.3, 1);
+    b.spr.position.set(b.pos.x + Math.sin(b.t * 3.1) * wob, gy + b.h + Math.sin(b.t * (b.kind === 'bee' ? 4 : 2)) * 0.12, b.pos.z + Math.cos(b.t * 2.5) * wob);
+    const base = b.sz;
+    b.spr.scale.set(base * (0.9 + 0.5 * Math.abs(Math.sin(b.t * b.flap))), base, 1);
     b.spr.visible = true;
   }
 }
