@@ -2,3 +2,5 @@ tools/node_modules/
 tools/package-lock.json
 docs/research/
 verify/
+
+.about-evidence/
